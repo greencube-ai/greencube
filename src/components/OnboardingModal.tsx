@@ -71,7 +71,10 @@ export function OnboardingModal() {
         {step === 1 && (
           <div className="onboarding-step">
             <div className="flex items-center gap-3 mb-3">
-              <div className="w-5 h-5 rounded-md logo-glow" style={{ border: '2px solid var(--accent)', backgroundColor: 'transparent' }} />
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                <rect x="3" y="3" width="11" height="11" rx="2" stroke="var(--accent)" strokeWidth="2" opacity="0.5" />
+                <rect x="10" y="10" width="11" height="11" rx="2" stroke="var(--accent)" strokeWidth="2" />
+              </svg>
               <h1 className="text-2xl font-bold">Welcome to GreenCube</h1>
             </div>
             <p className="text-base text-[var(--text-secondary)] mb-8">

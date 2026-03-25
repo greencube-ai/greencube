@@ -45,7 +45,10 @@ export function Layout({ children }: LayoutProps) {
       >
         {/* Logo */}
         <div className="p-4 flex items-center gap-2.5">
-          <div className="w-3.5 h-3.5 rounded-sm logo-glow" style={{ border: '2px solid var(--accent)', backgroundColor: 'transparent' }} />
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" className="logo-glow" style={{ borderRadius: '4px' }}>
+            <rect x="3" y="3" width="11" height="11" rx="2" stroke="var(--accent)" strokeWidth="2" opacity="0.5" />
+            <rect x="10" y="10" width="11" height="11" rx="2" stroke="var(--accent)" strokeWidth="2" />
+          </svg>
           <span className="text-lg font-bold text-[var(--text-primary)]">GreenCube</span>
         </div>
 
