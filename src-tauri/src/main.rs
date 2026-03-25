@@ -8,6 +8,7 @@ mod commands;
 mod competence;
 mod config;
 mod context;
+mod context_budget;
 mod db;
 mod errors;
 mod feedback;
@@ -24,11 +25,13 @@ mod permissions;
 mod profile;
 mod projects;
 mod providers;
+mod ratings;
 mod reflection;
 mod sandbox;
 mod state;
 mod task_queue;
 mod time_sense;
+mod token_usage;
 mod tool_memory;
 
 use config::config_dir;
@@ -156,6 +159,9 @@ fn main() {
             commands::get_docker_status,
             commands::get_server_info,
             commands::reset_app,
+            commands::rate_response,
+            commands::get_approval_rate,
+            commands::get_token_usage_today,
             commands::get_agent_messages,
             commands::get_goals,
             commands::get_metrics,

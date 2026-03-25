@@ -60,6 +60,9 @@ fn run_migrations(conn: &Connection) -> anyhow::Result<()> {
     if version < 5 {
         migrate_v4_to_v5(conn)?;
     }
+    if version < 6 {
+        migrate_v5_to_v6(conn)?;
+    }
     Ok(())
 }
 
@@ -404,6 +407,34 @@ fn migrate_v4_to_v5(conn: &Connection) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// v5 → v6: Response ratings, token usage tracking
+fn migrate_v5_to_v6(conn: &Connection) -> anyhow::Result<()> {
+    conn.execute_batch(r#"
+        CREATE TABLE IF NOT EXISTS response_ratings (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            task_id TEXT,
+            rating INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS token_usage (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            category TEXT NOT NULL,
+            tokens INTEGER NOT NULL,
+            date TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_token_usage ON token_usage(agent_id, date, category);
+    "#)?;
+    set_version(conn, 6)?;
+    tracing::info!("Database migrated to v6");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -445,13 +476,16 @@ mod tests {
         assert!(tables.contains(&"feedback_signals".to_string()));
         assert!(tables.contains(&"projects".to_string()));
         assert!(tables.contains(&"task_patterns".to_string()));
+        // v6 tables
+        assert!(tables.contains(&"response_ratings".to_string()));
+        assert!(tables.contains(&"token_usage".to_string()));
     }
 
     #[test]
-    fn test_schema_version_is_5() {
+    fn test_schema_version_is_6() {
         let conn = init_memory_database().expect("init");
         let version = get_version(&conn).expect("version");
-        assert_eq!(version, 5);
+        assert_eq!(version, 6);
     }
 
     #[test]
@@ -467,7 +501,7 @@ mod tests {
         run_migrations(&conn).expect("first");
         // Running again should be a no-op (version is already 3)
         run_migrations(&conn).expect("second should not fail");
-        assert_eq!(get_version(&conn).expect("v"), 5);
+        assert_eq!(get_version(&conn).expect("v"), 6);
     }
 
     #[test]

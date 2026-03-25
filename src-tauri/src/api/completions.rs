@@ -611,46 +611,72 @@ async fn finish_task(
         let _ = crate::metrics::record_metric(&db, agent_id);
     }
 
-    // Spawn self-reflection if enabled and task succeeded
-    if success {
-        if let (Some(provider), Some(msgs)) = (provider, messages) {
-            let reflection_enabled = state.config.read().await.llm.self_reflection_enabled;
-            if reflection_enabled && msgs.len() >= 2 {
-                crate::reflection::spawn_reflection(
-                    state.clone(),
-                    agent_id.to_string(),
-                    provider.clone(),
-                    msgs.to_vec(),
-                    task_id.to_string(),
-                );
-            }
+    // Background features only run in Alive Mode
+    let config = state.config.read().await;
+    let alive_mode = config.ui.alive_mode;
+    let reflection_enabled = config.llm.self_reflection_enabled;
+    drop(config);
 
-            // Check if dynamic profile needs regeneration (every 5 tasks)
+    if success && alive_mode {
+        if let (Some(provider), Some(msgs)) = (provider, messages) {
             let (total_tasks, active_goal_count) = {
                 let db = state.db.lock().await;
                 let total = registry::get_agent(&db, agent_id).ok().flatten().map(|a| a.total_tasks).unwrap_or(0);
                 let goals = crate::goals::count_active_goals(&db, agent_id).unwrap_or(0);
                 (total, goals)
             };
+
+            // Reflection: every 3rd task, every failed task, or first task ever (bootstrap)
+            let should_reflect = reflection_enabled && msgs.len() >= 2
+                && (total_tasks == 1 || total_tasks % 3 == 0);
+            if should_reflect {
+                crate::reflection::spawn_reflection(
+                    state.clone(), agent_id.to_string(), provider.clone(),
+                    msgs.to_vec(), task_id.to_string(),
+                );
+            }
+
             crate::profile::maybe_regenerate(
-                state.clone(),
-                agent_id.to_string(),
-                provider.clone(),
-                total_tasks,
+                state.clone(), agent_id.to_string(), provider.clone(), total_tasks,
             );
 
-            // Check if goals should be generated
             crate::goals::maybe_generate_goals(
-                state.clone(),
-                agent_id.to_string(),
-                provider.clone(),
-                total_tasks,
-                active_goal_count,
+                state.clone(), agent_id.to_string(), provider.clone(),
+                total_tasks, active_goal_count,
             );
+
+            // Journal (every 3rd task)
+            let db = state.db.lock().await;
+            if crate::journal::should_write_journal(&db, agent_id) {
+                drop(db);
+                crate::journal::spawn_journal_synthesis(
+                    state.clone(), agent_id.to_string(), provider.clone(),
+                );
+            }
         }
     }
 
-    Json(response).into_response()
+    // Reflection on FAILED tasks runs even in Core Mode (if reflection enabled)
+    if !success && reflection_enabled {
+        if let (Some(provider), Some(msgs)) = (provider, messages) {
+            if msgs.len() >= 2 {
+                crate::reflection::spawn_reflection(
+                    state.clone(), agent_id.to_string(), provider.clone(),
+                    msgs.to_vec(), task_id.to_string(),
+                );
+            }
+        }
+    }
+
+    // Add task_id to response (both JSON body and header) for rating support
+    let mut response = response;
+    response["greencube_task_id"] = serde_json::Value::String(task_id.to_string());
+    let mut resp = Json(response).into_response();
+    resp.headers_mut().insert(
+        "x-greencube-task-id",
+        axum::http::HeaderValue::from_str(task_id).unwrap_or_else(|_| axum::http::HeaderValue::from_static("")),
+    );
+    resp
 }
 
 async fn execute_tool_call(state: &AppState, agent_id: &str, tool_name: &str, arguments: &serde_json::Value) -> String {

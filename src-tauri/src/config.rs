@@ -9,6 +9,8 @@ pub struct AppConfig {
     pub ui: UiConfig,
     #[serde(default)]
     pub idle: IdleConfig,
+    #[serde(default)]
+    pub cost: CostConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,6 +42,19 @@ pub struct SandboxConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiConfig {
     pub onboarding_complete: bool,
+    #[serde(default)]
+    pub alive_mode: bool, // false = Core Mode (zero background tokens), true = Alive Mode
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CostConfig {
+    pub daily_background_token_budget: u64,
+}
+
+impl Default for CostConfig {
+    fn default() -> Self {
+        Self { daily_background_token_budget: 10000 }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,8 +102,10 @@ impl Default for AppConfig {
             },
             ui: UiConfig {
                 onboarding_complete: false,
+                alive_mode: false, // Core Mode by default
             },
             idle: IdleConfig::default(),
+            cost: CostConfig::default(),
         }
     }
 }

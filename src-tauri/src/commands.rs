@@ -129,6 +129,36 @@ pub async fn reset_app(_state: State<'_, Arc<AppState>>) -> Result<()> {
     Ok(())
 }
 
+// ─── Rating Commands ─────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn rate_response(agent_id: String, task_id: String, rating: i32, state: State<'_, Arc<AppState>>) -> Result<()> {
+    let db = state.db.lock().await;
+    crate::ratings::rate_response(&db, &agent_id, &task_id, rating)
+        .map_err(|e| GreenCubeError::Internal(e.to_string()))
+}
+
+#[tauri::command]
+pub async fn get_approval_rate(agent_id: String, state: State<'_, Arc<AppState>>) -> Result<f64> {
+    let db = state.db.lock().await;
+    crate::ratings::get_approval_rate(&db, &agent_id, 30)
+        .map_err(|e| GreenCubeError::Internal(e.to_string()))
+}
+
+// ─── Token Usage Commands ────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn get_token_usage_today(agent_id: String, state: State<'_, Arc<AppState>>) -> Result<serde_json::Value> {
+    let db = state.db.lock().await;
+    let summary = crate::token_usage::get_usage_today(&db, &agent_id)
+        .map_err(|e| GreenCubeError::Internal(e.to_string()))?;
+    Ok(serde_json::json!({
+        "task_tokens": summary.task_tokens,
+        "background_tokens": summary.background_tokens,
+        "breakdown": summary.breakdown,
+    }))
+}
+
 // ─── Message Commands ────────────────────────────────────────────────────────
 
 #[tauri::command]
