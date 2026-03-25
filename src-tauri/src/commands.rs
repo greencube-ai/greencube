@@ -129,6 +129,85 @@ pub async fn reset_app(_state: State<'_, Arc<AppState>>) -> Result<()> {
     Ok(())
 }
 
+// ─── Goal Commands ──────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn get_goals(agent_id: String, status: Option<String>, state: State<'_, Arc<AppState>>) -> Result<Vec<crate::goals::Goal>> {
+    let db = state.db.lock().await;
+    crate::goals::list_goals(&db, &agent_id, status.as_deref())
+        .map_err(|e| GreenCubeError::Internal(e.to_string()))
+}
+
+// ─── Metrics Commands ───────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn get_metrics(agent_id: String, days: Option<i64>, state: State<'_, Arc<AppState>>) -> Result<Vec<crate::metrics::MetricSnapshot>> {
+    let db = state.db.lock().await;
+    crate::metrics::get_metrics(&db, &agent_id, days.unwrap_or(30))
+        .map_err(|e| GreenCubeError::Internal(e.to_string()))
+}
+
+// ─── Idle Thought Commands ──────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn get_idle_thoughts(agent_id: String, limit: Option<i64>, state: State<'_, Arc<AppState>>) -> Result<serde_json::Value> {
+    let db = state.db.lock().await;
+    let thoughts = crate::idle_thinker::get_recent_thoughts(&db, &agent_id, limit.unwrap_or(20))
+        .map_err(|e| GreenCubeError::Internal(e.to_string()))?;
+    Ok(serde_json::json!(thoughts.iter().map(|(id, content, ttype, created)| {
+        serde_json::json!({"id": id, "content": content, "thought_type": ttype, "created_at": created})
+    }).collect::<Vec<_>>()))
+}
+
+// ─── Capability Commands ────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn get_capabilities(agent_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<crate::capabilities::Capability>> {
+    let db = state.db.lock().await;
+    crate::capabilities::list_capabilities(&db, &agent_id)
+        .map_err(|e| GreenCubeError::Internal(e.to_string()))
+}
+
+#[tauri::command]
+pub async fn search_capabilities(query: String, state: State<'_, Arc<AppState>>) -> Result<serde_json::Value> {
+    let db = state.db.lock().await;
+    let results = crate::capabilities::search_capabilities(&db, &query)
+        .map_err(|e| GreenCubeError::Internal(e.to_string()))?;
+    Ok(serde_json::json!(results.iter().map(|(agent_id, agent_name, cap, conf)| {
+        serde_json::json!({"agent_id": agent_id, "agent_name": agent_name, "capability": cap, "confidence": conf})
+    }).collect::<Vec<_>>()))
+}
+
+// ─── Notification Commands ───────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn get_unread_count(state: State<'_, Arc<AppState>>) -> Result<i64> {
+    let db = state.db.lock().await;
+    crate::notifications::get_unread_count(&db)
+        .map_err(|e| GreenCubeError::Internal(e.to_string()))
+}
+
+#[tauri::command]
+pub async fn get_notifications(unread_only: bool, limit: Option<i64>, state: State<'_, Arc<AppState>>) -> Result<Vec<crate::notifications::Notification>> {
+    let db = state.db.lock().await;
+    crate::notifications::get_notifications(&db, unread_only, limit.unwrap_or(50))
+        .map_err(|e| GreenCubeError::Internal(e.to_string()))
+}
+
+#[tauri::command]
+pub async fn mark_notification_read(id: String, state: State<'_, Arc<AppState>>) -> Result<()> {
+    let db = state.db.lock().await;
+    crate::notifications::mark_read(&db, &id)
+        .map_err(|e| GreenCubeError::Internal(e.to_string()))
+}
+
+#[tauri::command]
+pub async fn dismiss_all_notifications(state: State<'_, Arc<AppState>>) -> Result<()> {
+    let db = state.db.lock().await;
+    crate::notifications::dismiss_all(&db)
+        .map_err(|e| GreenCubeError::Internal(e.to_string()))
+}
+
 // ─── Knowledge Commands ──────────────────────────────────────────────────────
 
 #[tauri::command]

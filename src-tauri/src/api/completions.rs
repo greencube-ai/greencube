@@ -117,9 +117,21 @@ pub async fn chat_completions(
             injections.push(format!("--- Your profile ---\n{}\n--- End profile ---", profile));
         }
 
-        // Working context (max 1000 chars)
+        // Goals + working context
         {
             let db = state.db.lock().await;
+
+            // Active goals
+            let active_goals = crate::goals::list_goals(&db, &agent.id, Some("active")).unwrap_or_default();
+            if !active_goals.is_empty() {
+                let goals_text = active_goals.iter()
+                    .enumerate()
+                    .map(|(i, g)| format!("{}. {}", i + 1, g.content))
+                    .collect::<Vec<_>>().join("\n");
+                injections.push(format!("--- Your current goals ---\n{}\n--- End goals ---", goals_text));
+            }
+
+            // Working context (max 1000 chars)
             let ctx = crate::context::get_context(&db, &agent.id).unwrap_or_default();
             if !ctx.is_empty() {
                 injections.push(format!(
@@ -565,6 +577,12 @@ async fn finish_task(
     emit_status(&state, agent_id, "idle");
     emit_refresh(&state);
 
+    // Record growth metrics (UPSERT today's snapshot)
+    {
+        let db = state.db.lock().await;
+        let _ = crate::metrics::record_metric(&db, agent_id);
+    }
+
     // Spawn self-reflection if enabled and task succeeded
     if success {
         if let (Some(provider), Some(msgs)) = (provider, messages) {
@@ -580,19 +598,26 @@ async fn finish_task(
             }
 
             // Check if dynamic profile needs regeneration (every 5 tasks)
-            let total_tasks = {
+            let (total_tasks, active_goal_count) = {
                 let db = state.db.lock().await;
-                registry::get_agent(&db, agent_id)
-                    .ok()
-                    .flatten()
-                    .map(|a| a.total_tasks)
-                    .unwrap_or(0)
+                let total = registry::get_agent(&db, agent_id).ok().flatten().map(|a| a.total_tasks).unwrap_or(0);
+                let goals = crate::goals::count_active_goals(&db, agent_id).unwrap_or(0);
+                (total, goals)
             };
             crate::profile::maybe_regenerate(
                 state.clone(),
                 agent_id.to_string(),
                 provider.clone(),
                 total_tasks,
+            );
+
+            // Check if goals should be generated
+            crate::goals::maybe_generate_goals(
+                state.clone(),
+                agent_id.to_string(),
+                provider.clone(),
+                total_tasks,
+                active_goal_count,
             );
         }
     }

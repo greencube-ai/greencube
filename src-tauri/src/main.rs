@@ -1,14 +1,19 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod api;
+mod capabilities;
 mod commands;
 mod config;
 mod context;
 mod db;
 mod errors;
+mod goals;
 mod identity;
+mod idle_thinker;
 mod knowledge;
 mod memory;
+mod metrics;
+mod notifications;
 mod permissions;
 mod profile;
 mod providers;
@@ -110,6 +115,12 @@ fn main() {
                     .expect("API server crashed");
             });
 
+            // Spawn idle thinker background loop
+            let idle_state = state.clone();
+            tauri::async_runtime::spawn(async move {
+                idle_thinker::run_idle_thinker(idle_state).await;
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -124,6 +135,15 @@ fn main() {
             commands::get_docker_status,
             commands::get_server_info,
             commands::reset_app,
+            commands::get_goals,
+            commands::get_metrics,
+            commands::get_idle_thoughts,
+            commands::get_capabilities,
+            commands::search_capabilities,
+            commands::get_unread_count,
+            commands::get_notifications,
+            commands::mark_notification_read,
+            commands::dismiss_all_notifications,
             commands::get_knowledge,
             commands::get_agent_context,
             commands::set_agent_context,

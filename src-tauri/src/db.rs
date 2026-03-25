@@ -51,6 +51,9 @@ fn run_migrations(conn: &Connection) -> anyhow::Result<()> {
     if version < 2 {
         migrate_v1_to_v2(conn)?;
     }
+    if version < 3 {
+        migrate_v2_to_v3(conn)?;
+    }
     Ok(())
 }
 
@@ -197,6 +200,80 @@ fn migrate_v1_to_v2(conn: &Connection) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// v2 → v3: Idle thoughts, goals, notifications, metrics, capabilities
+fn migrate_v2_to_v3(conn: &Connection) -> anyhow::Result<()> {
+    conn.execute_batch(
+        r#"
+        -- Agent idle thoughts
+        CREATE TABLE IF NOT EXISTS idle_thoughts (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            content TEXT NOT NULL,
+            thought_type TEXT NOT NULL DEFAULT 'insight',
+            created_at TEXT NOT NULL,
+            acted_on INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_idle_thoughts_agent ON idle_thoughts(agent_id, created_at DESC);
+
+        -- Self-directed goals
+        CREATE TABLE IF NOT EXISTS agent_goals (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            content TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            progress_notes TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_goals_agent ON agent_goals(agent_id, status);
+
+        -- Agent-initiated notifications
+        CREATE TABLE IF NOT EXISTS notifications (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            content TEXT NOT NULL,
+            notification_type TEXT NOT NULL DEFAULT 'insight',
+            read INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            source TEXT,
+            FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(read, created_at DESC);
+
+        -- Growth metrics (daily snapshots)
+        CREATE TABLE IF NOT EXISTS agent_metrics (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            date TEXT NOT NULL,
+            total_tasks INTEGER NOT NULL,
+            successful_tasks INTEGER NOT NULL,
+            knowledge_count INTEGER NOT NULL DEFAULT 0,
+            total_spend_cents INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE,
+            UNIQUE(agent_id, date)
+        );
+
+        -- Capability-based discovery
+        CREATE TABLE IF NOT EXISTS agent_capabilities (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            capability TEXT NOT NULL,
+            confidence REAL NOT NULL DEFAULT 0.5,
+            source TEXT NOT NULL DEFAULT 'auto',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_capabilities_search ON agent_capabilities(capability);
+    "#,
+    )?;
+
+    set_version(conn, 3)?;
+    tracing::info!("Database migrated to v3");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,13 +300,19 @@ mod tests {
         assert!(tables.contains(&"knowledge".to_string()));
         assert!(tables.contains(&"agent_context".to_string()));
         assert!(tables.contains(&"tool_results".to_string()));
+        // v3 tables
+        assert!(tables.contains(&"idle_thoughts".to_string()));
+        assert!(tables.contains(&"agent_goals".to_string()));
+        assert!(tables.contains(&"notifications".to_string()));
+        assert!(tables.contains(&"agent_metrics".to_string()));
+        assert!(tables.contains(&"agent_capabilities".to_string()));
     }
 
     #[test]
-    fn test_schema_version_is_2() {
+    fn test_schema_version_is_3() {
         let conn = init_memory_database().expect("init");
         let version = get_version(&conn).expect("version");
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
     }
 
     #[test]
@@ -243,9 +326,9 @@ mod tests {
         conn.execute("INSERT INTO schema_version (version) VALUES (0)", [])
             .expect("insert");
         run_migrations(&conn).expect("first");
-        // Running again should be a no-op (version is already 2)
+        // Running again should be a no-op (version is already 3)
         run_migrations(&conn).expect("second should not fail");
-        assert_eq!(get_version(&conn).expect("v"), 2);
+        assert_eq!(get_version(&conn).expect("v"), 3);
     }
 
     #[test]

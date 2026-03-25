@@ -7,6 +7,8 @@ pub struct AppConfig {
     pub server: ServerConfig,
     pub sandbox: SandboxConfig,
     pub ui: UiConfig,
+    #[serde(default)]
+    pub idle: IdleConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,6 +42,25 @@ pub struct UiConfig {
     pub onboarding_complete: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IdleConfig {
+    pub idle_thinking_enabled: bool,
+    pub idle_minutes_before_think: u64,
+    pub max_thoughts_per_cycle: u64,
+    pub max_daily_idle_cycles: u64,
+}
+
+impl Default for IdleConfig {
+    fn default() -> Self {
+        Self {
+            idle_thinking_enabled: true,
+            idle_minutes_before_think: 15,
+            max_thoughts_per_cycle: 3,
+            max_daily_idle_cycles: 10,
+        }
+    }
+}
+
 fn default_memory_mode() -> String { "off".into() }
 fn default_true() -> bool { true }
 
@@ -67,6 +88,7 @@ impl Default for AppConfig {
             ui: UiConfig {
                 onboarding_complete: false,
             },
+            idle: IdleConfig::default(),
         }
     }
 }
