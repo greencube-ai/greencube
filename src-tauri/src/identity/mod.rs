@@ -3,7 +3,7 @@ pub mod registry;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)] // private_key stored for future message signing (v0.2 multiplayer)
+#[allow(dead_code)]
 pub struct Agent {
     pub id: String,
     pub name: String,
@@ -20,6 +20,8 @@ pub struct Agent {
     pub total_tasks: i64,
     pub successful_tasks: i64,
     pub total_spend_cents: i64,
+    pub provider_id: Option<String>,
+    pub dynamic_profile: String,
 }
 
 /// Serializable agent for API responses (no private key, includes computed fields)
@@ -37,13 +39,15 @@ pub struct AgentResponse {
     pub successful_tasks: i64,
     pub total_spend_cents: i64,
     pub reputation: f64,
-    pub public_key: String, // base64-encoded
+    pub public_key: String,
+    pub provider_id: Option<String>,
+    pub dynamic_profile: String,
 }
 
 impl Agent {
     pub fn reputation(&self) -> f64 {
         if self.total_tasks == 0 {
-            0.5 // Starting reputation
+            0.5
         } else {
             (self.successful_tasks as f64 / self.total_tasks as f64) * 0.8 + 0.5 * 0.2
         }
@@ -65,6 +69,8 @@ impl Agent {
             total_spend_cents: self.total_spend_cents,
             reputation: self.reputation(),
             public_key: base64::engine::general_purpose::STANDARD.encode(&self.public_key),
+            provider_id: self.provider_id.clone(),
+            dynamic_profile: self.dynamic_profile.clone(),
         }
     }
 }

@@ -89,16 +89,21 @@ async fn start_mock_llm() -> (Arc<MockLlmState>, String) {
 
 fn create_test_state(mock_llm_url: &str) -> Arc<crate::state::AppState> {
     let conn = crate::db::init_memory_database().expect("init in-memory db");
+
+    // Create a provider pointing at the mock LLM
+    crate::providers::create_provider(
+        &conn, "MockProvider", mock_llm_url, "test-key-12345", "gpt-4o", "openai"
+    ).expect("create test provider");
+
     let mut config = crate::config::AppConfig::default();
-    config.llm.api_base_url = mock_llm_url.into();
-    config.llm.api_key = "test-key-12345".into();
-    config.llm.memory_injection_enabled = true; // Enable for integration tests
+    config.llm.memory_mode = "keyword".into(); // Enable keyword recall for integration tests
+    config.llm.self_reflection_enabled = false; // Disable reflection in tests (no real LLM)
 
     Arc::new(crate::state::AppState {
         db: tokio::sync::Mutex::new(conn),
         config: tokio::sync::RwLock::new(config),
-        docker: tokio::sync::RwLock::new(None), // No Docker in tests
-        app_handle: None,                        // No Tauri runtime in tests
+        docker: tokio::sync::RwLock::new(None),
+        app_handle: None,
         actual_port: 0,
     })
 }

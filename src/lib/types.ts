@@ -12,6 +12,8 @@ export interface Agent {
   total_spend_cents: number;
   reputation: number;
   public_key: string;
+  provider_id?: string;
+  dynamic_profile: string;
 }
 
 export interface Episode {
@@ -45,7 +47,8 @@ export interface AppConfig {
     api_base_url: string;
     api_key: string;
     default_model: string;
-    memory_injection_enabled: boolean;
+    memory_mode: string; // "off", "keyword"
+    self_reflection_enabled: boolean;
   };
   server: {
     host: string;
@@ -63,6 +66,28 @@ export interface AppConfig {
   };
 }
 
+export interface KnowledgeEntry {
+  id: string;
+  agent_id: string;
+  content: string;
+  source_task_id?: string;
+  category: string;
+  confidence: number;
+  created_at: string;
+  last_used_at?: string;
+  use_count: number;
+}
+
 export interface DockerStatus {
   available: boolean;
+}
+
+export interface Provider {
+  id: string;
+  name: string;
+  api_base_url: string;
+  api_key: string;
+  default_model: string;
+  provider_type: string;
+  created_at: string;
 }

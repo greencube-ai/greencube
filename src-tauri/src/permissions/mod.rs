@@ -38,6 +38,8 @@ mod tests {
             total_tasks: 0,
             successful_tasks: 0,
             total_spend_cents: total_spend,
+            provider_id: None,
+            dynamic_profile: String::new(),
         }
     }
 

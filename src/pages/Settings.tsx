@@ -96,20 +96,30 @@ export function Settings() {
               className="w-full"
             />
           </div>
+          <div className="mt-4">
+            <label className="block text-xs text-[var(--text-muted)] mb-1">Memory Mode</label>
+            <select value={config.llm.memory_mode} onChange={(e) => update('llm.memory_mode', e.target.value)} className="w-48">
+              <option value="off">Off</option>
+              <option value="keyword">Keyword matching</option>
+            </select>
+            <p className="text-[10px] text-[var(--text-muted)] mt-1">
+              When enabled, injects relevant knowledge from past tasks into agent context.
+            </p>
+          </div>
           <div className="flex items-start gap-3 mt-4">
             <input
               type="checkbox"
-              id="memory-injection"
-              checked={config.llm.memory_injection_enabled}
-              onChange={(e) => update('llm.memory_injection_enabled', e.target.checked)}
+              id="self-reflection"
+              checked={config.llm.self_reflection_enabled}
+              onChange={(e) => update('llm.self_reflection_enabled', e.target.checked)}
               className="w-4 h-4 mt-0.5 accent-[var(--accent)]"
             />
             <div>
-              <label htmlFor="memory-injection" className="text-sm text-[var(--text-secondary)] cursor-pointer">
-                Auto-inject memories
+              <label htmlFor="self-reflection" className="text-sm text-[var(--text-secondary)] cursor-pointer">
+                Self-reflection after tasks
               </label>
               <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
-                Experimental. Injects relevant past memories into agent context. May increase token usage.
+                Agents review what they learned after each task. Sends an additional LLM request. Free with local models (Ollama).
               </p>
             </div>
           </div>

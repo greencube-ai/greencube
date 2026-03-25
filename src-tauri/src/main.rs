@@ -3,13 +3,19 @@
 mod api;
 mod commands;
 mod config;
+mod context;
 mod db;
 mod errors;
 mod identity;
+mod knowledge;
 mod memory;
 mod permissions;
+mod profile;
+mod providers;
+mod reflection;
 mod sandbox;
 mod state;
+mod tool_memory;
 
 use config::config_dir;
 use state::AppState;
@@ -118,6 +124,13 @@ fn main() {
             commands::get_docker_status,
             commands::get_server_info,
             commands::reset_app,
+            commands::get_knowledge,
+            commands::get_agent_context,
+            commands::set_agent_context,
+            commands::get_providers,
+            commands::create_provider,
+            commands::update_provider,
+            commands::delete_provider,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {

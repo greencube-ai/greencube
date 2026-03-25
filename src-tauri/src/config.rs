@@ -14,8 +14,10 @@ pub struct LlmConfig {
     pub api_base_url: String,
     pub api_key: String,
     pub default_model: String,
-    #[serde(default)]
-    pub memory_injection_enabled: bool,
+    #[serde(default = "default_memory_mode")]
+    pub memory_mode: String, // "off", "keyword"
+    #[serde(default = "default_true")]
+    pub self_reflection_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +40,9 @@ pub struct UiConfig {
     pub onboarding_complete: bool,
 }
 
+fn default_memory_mode() -> String { "off".into() }
+fn default_true() -> bool { true }
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -45,7 +50,8 @@ impl Default for AppConfig {
                 api_base_url: "https://api.openai.com/v1".into(),
                 api_key: String::new(),
                 default_model: "gpt-4o".into(),
-                memory_injection_enabled: false,
+                memory_mode: "off".into(),
+                self_reflection_enabled: true,
             },
             server: ServerConfig {
                 host: "127.0.0.1".into(),

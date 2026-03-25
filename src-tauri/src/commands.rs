@@ -6,6 +6,8 @@ use crate::memory::episodic;
 use crate::memory::Episode;
 use crate::permissions::audit;
 use crate::permissions::audit::AuditEntry;
+use crate::providers;
+use crate::providers::Provider;
 use crate::state::AppState;
 use std::sync::Arc;
 use tauri::State;
@@ -34,11 +36,13 @@ pub async fn create_agent(
     name: String,
     system_prompt: String,
     tools_allowed: Vec<String>,
+    provider_id: Option<String>,
     state: State<'_, Arc<AppState>>,
 ) -> Result<AgentResponse> {
     let db = state.db.lock().await;
-    let agent = registry::create_agent(&db, &name, &system_prompt, &tools_allowed)
-        .map_err(|e| GreenCubeError::Validation(e.to_string()))?;
+    let agent = registry::create_agent_with_provider(
+        &db, &name, &system_prompt, &tools_allowed, provider_id.as_deref()
+    ).map_err(|e| GreenCubeError::Validation(e.to_string()))?;
     Ok(agent.to_response())
 }
 
@@ -123,4 +127,73 @@ pub async fn reset_app(_state: State<'_, Arc<AppState>>) -> Result<()> {
     crate::config::save_config(&default_config)
         .map_err(|e| GreenCubeError::Internal(e.to_string()))?;
     Ok(())
+}
+
+// ─── Knowledge Commands ──────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn get_knowledge(agent_id: String, limit: Option<i64>, state: State<'_, Arc<AppState>>) -> Result<Vec<crate::knowledge::KnowledgeEntry>> {
+    let db = state.db.lock().await;
+    crate::knowledge::list_knowledge(&db, &agent_id, limit.unwrap_or(50))
+        .map_err(|e| GreenCubeError::Internal(e.to_string()))
+}
+
+// ─── Context Commands ────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn get_agent_context(agent_id: String, state: State<'_, Arc<AppState>>) -> Result<String> {
+    let db = state.db.lock().await;
+    crate::context::get_context(&db, &agent_id)
+        .map_err(|e| GreenCubeError::Internal(e.to_string()))
+}
+
+#[tauri::command]
+pub async fn set_agent_context(agent_id: String, content: String, state: State<'_, Arc<AppState>>) -> Result<()> {
+    let db = state.db.lock().await;
+    crate::context::set_context(&db, &agent_id, &content)
+        .map_err(|e| GreenCubeError::Internal(e.to_string()))
+}
+
+// ─── Provider Commands ──────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn get_providers(state: State<'_, Arc<AppState>>) -> Result<Vec<Provider>> {
+    let db = state.db.lock().await;
+    providers::list_providers(&db).map_err(|e| GreenCubeError::Internal(e.to_string()))
+}
+
+#[tauri::command]
+pub async fn create_provider(
+    name: String,
+    api_base_url: String,
+    api_key: String,
+    default_model: String,
+    provider_type: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Provider> {
+    let db = state.db.lock().await;
+    providers::create_provider(&db, &name, &api_base_url, &api_key, &default_model, &provider_type)
+        .map_err(|e| GreenCubeError::Validation(e.to_string()))
+}
+
+#[tauri::command]
+pub async fn update_provider(
+    id: String,
+    name: String,
+    api_base_url: String,
+    api_key: String,
+    default_model: String,
+    provider_type: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<()> {
+    let db = state.db.lock().await;
+    providers::update_provider(&db, &id, &name, &api_base_url, &api_key, &default_model, &provider_type)
+        .map_err(|e| GreenCubeError::Internal(e.to_string()))
+}
+
+#[tauri::command]
+pub async fn delete_provider(id: String, state: State<'_, Arc<AppState>>) -> Result<()> {
+    let db = state.db.lock().await;
+    providers::delete_provider(&db, &id)
+        .map_err(|e| GreenCubeError::Internal(e.to_string()))
 }

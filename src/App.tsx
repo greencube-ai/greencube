@@ -5,6 +5,7 @@ import { Layout } from './components/Layout';
 import { Dashboard } from './pages/Dashboard';
 import { AgentDetail } from './pages/AgentDetail';
 import { Settings } from './pages/Settings';
+import { Connect } from './pages/Connect';
 import { OnboardingModal } from './components/OnboardingModal';
 
 // Error boundary to prevent white-screen crashes
@@ -63,6 +64,7 @@ function AppContent() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/agent/:id" element={<AgentDetail />} />
+          <Route path="/connect" element={<Connect />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </Layout>

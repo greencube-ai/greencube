@@ -107,14 +107,64 @@ pub async fn chat_completions(
     emit_status(&state, &agent.id, "active");
     emit_refresh(&state);
 
-    // 4. INJECT MEMORIES
-    let memory_enabled = state.config.read().await.llm.memory_injection_enabled;
-    if memory_enabled {
+    // 3b. INJECT WORKING CONTEXT (scratchpad) + DYNAMIC PROFILE
+    if let Some(messages) = body["messages"].as_array_mut() {
+        let mut injections = Vec::new();
+
+        // Dynamic profile (max 500 chars)
+        if !agent.dynamic_profile.is_empty() {
+            let profile: String = agent.dynamic_profile.chars().take(500).collect();
+            injections.push(format!("--- Your profile ---\n{}\n--- End profile ---", profile));
+        }
+
+        // Working context (max 1000 chars)
+        {
+            let db = state.db.lock().await;
+            let ctx = crate::context::get_context(&db, &agent.id).unwrap_or_default();
+            if !ctx.is_empty() {
+                injections.push(format!(
+                    "--- Your working context (you can update this with the update_context tool) ---\n{}\n--- End working context ---",
+                    ctx.chars().take(1000).collect::<String>()
+                ));
+            }
+        }
+
+        if !injections.is_empty() {
+            let injection_text = injections.join("\n\n");
+            if let Some(system_msg) = messages.iter_mut().find(|m| m["role"] == "system") {
+                if let Some(content) = system_msg["content"].as_str() {
+                    system_msg["content"] = serde_json::Value::String(format!("{}\n\n{}", content, injection_text));
+                }
+            } else {
+                messages.insert(0, serde_json::json!({"role": "system", "content": injection_text}));
+            }
+        }
+    }
+
+    // 4. INJECT KNOWLEDGE (replaces raw episode injection)
+    let memory_mode = state.config.read().await.llm.memory_mode.clone();
+    if memory_mode == "keyword" {
         if let Some(messages) = body["messages"].as_array_mut() {
             if let Some(last_user_msg) = messages.iter().rev().find(|m| m["role"] == "user").and_then(|m| m["content"].as_str()) {
                 let db = state.db.lock().await;
-                if let Ok(memories) = episodic::recall_relevant_episodes(&db, &agent.id, last_user_msg, 5) {
-                    inject_memories(messages, &memories);
+                // Try knowledge first (structured), fall back to episodes (raw)
+                let knowledge = crate::knowledge::recall_relevant(&db, &agent.id, last_user_msg, 10).unwrap_or_default();
+                if !knowledge.is_empty() {
+                    let knowledge_text = knowledge.iter()
+                        .map(|k| format!("- [{}] {}", k.category, k.content))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    let injection = format!("\n\n--- Things you know ---\n{}\n--- End knowledge ---", knowledge_text);
+                    if let Some(system_msg) = messages.iter_mut().find(|m| m["role"] == "system") {
+                        if let Some(content) = system_msg["content"].as_str() {
+                            system_msg["content"] = serde_json::Value::String(format!("{}{}", content, injection));
+                        }
+                    }
+                } else {
+                    // Fall back to episode-based recall if no knowledge entries yet
+                    if let Ok(memories) = episodic::recall_relevant_episodes(&db, &agent.id, last_user_msg, 5) {
+                        inject_memories(messages, &memories);
+                    }
                 }
             }
         }
@@ -129,14 +179,21 @@ pub async fn chat_completions(
         body["tools"] = serde_json::Value::Array(filtered);
     }
 
-    let config = state.config.read().await.clone();
+    // Look up agent's provider (or fall back to default)
+    let provider = {
+        let db = state.db.lock().await;
+        match crate::providers::get_provider_for_agent(&db, &agent) {
+            Ok(p) => p,
+            Err(e) => return error_response(StatusCode::SERVICE_UNAVAILABLE, &e.to_string()),
+        }
+    };
     let client = reqwest::Client::new();
-    let llm_url = format!("{}/chat/completions", config.llm.api_base_url);
+    let llm_url = format!("{}/chat/completions", provider.api_base_url);
 
     // STREAMING PATH: If client wants streaming AND no tools, stream directly from the first call
     if wants_stream && !has_tools {
         body["stream"] = serde_json::Value::Bool(true);
-        return stream_llm_response(state.clone(), &client, &llm_url, &config, &body, &agent.id, &task_id).await;
+        return stream_llm_response(state.clone(), &client, &llm_url, &provider, &body, &agent.id, &task_id).await;
     }
 
     // NON-STREAMING / TOOL-CALL PATH
@@ -156,7 +213,7 @@ pub async fn chat_completions(
 
         // Forward to LLM (non-streaming)
         let llm_response = match client.post(&llm_url)
-            .header("Authorization", format!("Bearer {}", config.llm.api_key))
+            .header("Authorization", format!("Bearer {}", provider.api_key))
             .header("Content-Type", "application/json")
             .json(&body)
             .timeout(std::time::Duration::from_secs(120))
@@ -238,7 +295,8 @@ pub async fn chat_completions(
 
         if let Some(tool_calls) = tool_calls {
             if tool_calls.is_empty() {
-                return finish_task(&state, &agent.id, &task_id, true, total_cost, response_body).await;
+                let msgs = body["messages"].as_array().map(|a| a.to_vec());
+                return finish_task(state.clone(), &agent.id, &task_id, true, total_cost, response_body, Some(&provider), msgs.as_deref()).await;
             }
 
             let mut tool_results = Vec::new();
@@ -264,7 +322,7 @@ pub async fn chat_completions(
                 let tool_result = if !permissions::check_tool_permission(&agent, func_name) {
                     format!("Permission denied: agent does not have access to tool '{}'", func_name)
                 } else {
-                    execute_tool_call(&state, func_name, &func_args).await
+                    execute_tool_call(&state, &agent.id, func_name, &func_args).await
                 };
 
                 tool_results.push(serde_json::json!({
@@ -279,9 +337,8 @@ pub async fn chat_completions(
                 messages.extend(tool_results);
             }
         } else {
-            // No tool calls — return final response as-is (even if client wanted streaming,
-            // we already have the complete response from the tool-call loop, no point re-sending)
-            return finish_task(&state, &agent.id, &task_id, true, total_cost, response_body).await;
+            let msgs = body["messages"].as_array().map(|a| a.to_vec());
+            return finish_task(state.clone(), &agent.id, &task_id, true, total_cost, response_body, Some(&provider), msgs.as_deref()).await;
         }
     }
 }
@@ -291,14 +348,14 @@ async fn stream_llm_response(
     state: Arc<AppState>,
     client: &reqwest::Client,
     llm_url: &str,
-    config: &crate::config::AppConfig,
+    provider: &crate::providers::Provider,
     body: &serde_json::Value,
     agent_id: &str,
     task_id: &str,
 ) -> Response {
     let llm_response = match client
         .post(llm_url)
-        .header("Authorization", format!("Bearer {}", config.llm.api_key))
+        .header("Authorization", format!("Bearer {}", provider.api_key))
         .header("Content-Type", "application/json")
         .json(body)
         .timeout(std::time::Duration::from_secs(120))
@@ -477,38 +534,89 @@ async fn stream_llm_response(
 }
 
 async fn finish_task(
-    state: &AppState,
+    state: Arc<AppState>,
     agent_id: &str,
     task_id: &str,
     success: bool,
     cost_cents: i64,
     response: serde_json::Value,
+    // For reflection: the provider and messages from the conversation
+    provider: Option<&crate::providers::Provider>,
+    messages: Option<&[serde_json::Value]>,
 ) -> Response {
-    let db = state.db.lock().await;
-    let _ = registry::update_agent_status(&db, agent_id, "idle");
-    let _ = registry::increment_task_counts(&db, agent_id, success, cost_cents);
-    let _ = episodic::insert_episode(&db, &Episode {
-        id: uuid::Uuid::new_v4().to_string(),
-        agent_id: agent_id.into(),
-        created_at: chrono::Utc::now().to_rfc3339(),
-        event_type: "task_end".into(),
-        summary: if success { "Task completed successfully" } else { "Task completed with errors" }.into(),
-        raw_data: None,
-        task_id: Some(task_id.into()),
-        outcome: Some(if success { "success" } else { "failure" }.into()),
-        tokens_used: 0,
-        cost_cents,
-    });
-    drop(db); // Release lock before emitting
+    {
+        let db = state.db.lock().await;
+        let _ = registry::update_agent_status(&db, agent_id, "idle");
+        let _ = registry::increment_task_counts(&db, agent_id, success, cost_cents);
+        let _ = episodic::insert_episode(&db, &Episode {
+            id: uuid::Uuid::new_v4().to_string(),
+            agent_id: agent_id.into(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            event_type: "task_end".into(),
+            summary: if success { "Task completed successfully" } else { "Task completed with errors" }.into(),
+            raw_data: None,
+            task_id: Some(task_id.into()),
+            outcome: Some(if success { "success" } else { "failure" }.into()),
+            tokens_used: 0,
+            cost_cents,
+        });
+    }
 
-    emit_status(state, agent_id, "idle");
-    emit_refresh(state);
+    emit_status(&state, agent_id, "idle");
+    emit_refresh(&state);
+
+    // Spawn self-reflection if enabled and task succeeded
+    if success {
+        if let (Some(provider), Some(msgs)) = (provider, messages) {
+            let reflection_enabled = state.config.read().await.llm.self_reflection_enabled;
+            if reflection_enabled && msgs.len() >= 2 {
+                crate::reflection::spawn_reflection(
+                    state.clone(),
+                    agent_id.to_string(),
+                    provider.clone(),
+                    msgs.to_vec(),
+                    task_id.to_string(),
+                );
+            }
+
+            // Check if dynamic profile needs regeneration (every 5 tasks)
+            let total_tasks = {
+                let db = state.db.lock().await;
+                registry::get_agent(&db, agent_id)
+                    .ok()
+                    .flatten()
+                    .map(|a| a.total_tasks)
+                    .unwrap_or(0)
+            };
+            crate::profile::maybe_regenerate(
+                state.clone(),
+                agent_id.to_string(),
+                provider.clone(),
+                total_tasks,
+            );
+        }
+    }
 
     Json(response).into_response()
 }
 
-async fn execute_tool_call(state: &AppState, tool_name: &str, arguments: &serde_json::Value) -> String {
-    match tool_name {
+async fn execute_tool_call(state: &AppState, agent_id: &str, tool_name: &str, arguments: &serde_json::Value) -> String {
+    // Tool memory: check for recent identical calls
+    let previous = {
+        let db = state.db.lock().await;
+        crate::tool_memory::lookup_recent(&db, agent_id, tool_name, arguments).ok().flatten()
+    };
+
+    let mut prefix = String::new();
+    if let Some(ref prev) = previous {
+        if prev.success {
+            prefix = format!("[Note: identical call was made at {} and returned: {}]\n\n", prev.created_at, prev.result.chars().take(200).collect::<String>());
+        } else {
+            prefix = format!("[Warning: this same call failed at {} with: {}]\n\n", prev.created_at, prev.result.chars().take(200).collect::<String>());
+        }
+    }
+
+    let result = match tool_name {
         "shell" => {
             let command = match arguments["command"].as_str() {
                 Some(c) => c,
@@ -541,8 +649,28 @@ async fn execute_tool_call(state: &AppState, tool_name: &str, arguments: &serde_
             };
             execute_shell(state, &format!("curl -sS {}", sandbox_docker::shell_escape(url))).await
         }
+        "update_context" => {
+            let content = match arguments["content"].as_str() {
+                Some(c) => c,
+                None => return "Error: update_context requires 'content' argument".into(),
+            };
+            let db = state.db.lock().await;
+            match crate::context::set_context(&db, agent_id, content) {
+                Ok(()) => "Context updated successfully.".into(),
+                Err(e) => format!("Error updating context: {}", e),
+            }
+        }
         _ => format!("Error: unknown tool '{}'", tool_name),
+    };
+
+    // Store tool result for future memory
+    if tool_name != "update_context" { // Don't cache context updates
+        let success = !result.starts_with("Error:");
+        let db = state.db.lock().await;
+        let _ = crate::tool_memory::store_result(&db, agent_id, tool_name, arguments, &result, success);
     }
+
+    format!("{}{}", prefix, result)
 }
 
 async fn execute_shell(state: &AppState, command: &str) -> String {
