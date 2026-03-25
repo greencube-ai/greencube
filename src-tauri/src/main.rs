@@ -28,6 +28,7 @@ mod providers;
 mod ratings;
 mod reflection;
 mod sandbox;
+mod spawn;
 mod state;
 mod task_queue;
 mod time_sense;
@@ -159,6 +160,7 @@ fn main() {
             commands::get_docker_status,
             commands::get_server_info,
             commands::reset_app,
+            commands::get_agent_lineage,
             commands::rate_response,
             commands::get_approval_rate,
             commands::get_token_usage_today,

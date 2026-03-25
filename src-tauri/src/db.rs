@@ -63,6 +63,9 @@ fn run_migrations(conn: &Connection) -> anyhow::Result<()> {
     if version < 6 {
         migrate_v5_to_v6(conn)?;
     }
+    if version < 7 {
+        migrate_v6_to_v7(conn)?;
+    }
     Ok(())
 }
 
@@ -435,6 +438,32 @@ fn migrate_v5_to_v6(conn: &Connection) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// v6 → v7: Agent self-replication (spawn_specialist)
+fn migrate_v6_to_v7(conn: &Connection) -> anyhow::Result<()> {
+    conn.execute_batch(r#"
+        CREATE TABLE IF NOT EXISTS agent_lineage (
+            id TEXT PRIMARY KEY,
+            parent_id TEXT,
+            child_id TEXT NOT NULL,
+            domain TEXT NOT NULL,
+            knowledge_transferred INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (parent_id) REFERENCES agents(id) ON DELETE SET NULL,
+            FOREIGN KEY (child_id) REFERENCES agents(id) ON DELETE CASCADE
+        );
+    "#)?;
+
+    // Add domain column to knowledge for accurate transfer
+    let has_domain: bool = conn.prepare("SELECT domain FROM knowledge LIMIT 0").is_ok();
+    if !has_domain {
+        conn.execute_batch("ALTER TABLE knowledge ADD COLUMN domain TEXT;")?;
+    }
+
+    set_version(conn, 7)?;
+    tracing::info!("Database migrated to v7");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -479,13 +508,15 @@ mod tests {
         // v6 tables
         assert!(tables.contains(&"response_ratings".to_string()));
         assert!(tables.contains(&"token_usage".to_string()));
+        // v7 tables
+        assert!(tables.contains(&"agent_lineage".to_string()));
     }
 
     #[test]
-    fn test_schema_version_is_6() {
+    fn test_schema_version_is_7() {
         let conn = init_memory_database().expect("init");
         let version = get_version(&conn).expect("version");
-        assert_eq!(version, 6);
+        assert_eq!(version, 7);
     }
 
     #[test]
@@ -501,7 +532,7 @@ mod tests {
         run_migrations(&conn).expect("first");
         // Running again should be a no-op (version is already 3)
         run_migrations(&conn).expect("second should not fail");
-        assert_eq!(get_version(&conn).expect("v"), 6);
+        assert_eq!(get_version(&conn).expect("v"), 7);
     }
 
     #[test]

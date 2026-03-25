@@ -756,6 +756,21 @@ async fn execute_tool_call(state: &AppState, agent_id: &str, tool_name: &str, ar
                 Err(e) => format!("Error setting reminder: {}", e),
             }
         }
+        "spawn_specialist" => {
+            let domain = match arguments["domain"].as_str() {
+                Some(d) => d,
+                None => return "Error: spawn_specialist requires 'domain' argument".into(),
+            };
+            let alive = state.config.read().await.ui.alive_mode;
+            if !alive { return "spawn_specialist requires Alive Mode. Enable in Settings.".into(); }
+            match crate::spawn::execute_spawn(state, agent_id, domain).await {
+                Ok(child_name) => format!(
+                    "Successfully created specialist: {}. You can delegate {} tasks to them using send_message(to=\"{}\", content=\"...\").",
+                    child_name, domain, child_name
+                ),
+                Err(e) => format!("Could not spawn specialist: {}", e),
+            }
+        }
         "send_message" => {
             let to_name = match arguments["to"].as_str() {
                 Some(t) => t,

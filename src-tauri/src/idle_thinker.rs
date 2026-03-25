@@ -116,6 +116,7 @@ Format your thoughts:
 [question] Something you'd like to explore
 [gap] Something missing from your knowledge
 [notify] Something important to tell the human (this will send a notification)
+[spawn] domain_name — if you have 20+ tasks and struggle in a domain (<55% success, 8+ tasks), spawn a specialist
 
 If you have nothing to think about, respond: IDLE
 Max 3 thoughts per cycle."#,
@@ -169,6 +170,7 @@ Max 3 thoughts per cycle."#,
                 notifications::count_idle_notifications_today(&db, &agent.id).unwrap_or(0)
             };
 
+            let mut spawn_request: Option<String> = None;
             {
                 let db = state.db.lock().await;
                 for line in content.lines() {
@@ -211,9 +213,22 @@ Max 3 thoughts per cycle."#,
                             let _ = insert_thought(&db, &agent.id, text, "connection");
                             let _ = knowledge::insert_knowledge(&db, &agent.id, text, "fact", None);
                         }
+                    } else if let Some(text) = trimmed.strip_prefix("[spawn]") {
+                        let domain = text.trim().to_string();
+                        if !domain.is_empty() && crate::spawn::can_spawn(&db, &agent.id) {
+                            let _ = insert_thought(&db, &agent.id, &format!("Initiating spawn for domain: {}", domain), "spawn");
+                            spawn_request = Some(domain);
+                        }
                     }
                 }
                 increment_config_counter(&db, &today_key);
+            }
+            // DB lock released. Handle spawn outside the lock.
+            if let Some(domain) = spawn_request {
+                match crate::spawn::execute_spawn(&state, &agent.id, &domain).await {
+                    Ok(child_name) => tracing::info!("Idle thinker spawned {} for agent {}", child_name, agent.id),
+                    Err(e) => tracing::warn!("Idle thinker spawn failed for {}: {}", domain, e),
+                }
             }
 
             if let Some(handle) = &state.app_handle {

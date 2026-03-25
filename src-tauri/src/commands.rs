@@ -129,6 +129,20 @@ pub async fn reset_app(_state: State<'_, Arc<AppState>>) -> Result<()> {
     Ok(())
 }
 
+// ─── Lineage Commands ────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn get_agent_lineage(agent_id: String, state: State<'_, Arc<AppState>>) -> Result<serde_json::Value> {
+    let db = state.db.lock().await;
+    let lineage = crate::spawn::get_lineage(&db, &agent_id);
+    Ok(serde_json::json!({
+        "parent": lineage.parent.map(|(id, name, domain)| serde_json::json!({"id": id, "name": name, "domain": domain})),
+        "children": lineage.children.iter().map(|(id, name, domain, count)| {
+            serde_json::json!({"id": id, "name": name, "domain": domain, "knowledge_transferred": count})
+        }).collect::<Vec<_>>(),
+    }))
+}
+
 // ─── Rating Commands ─────────────────────────────────────────────────────────
 
 #[tauri::command]

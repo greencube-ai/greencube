@@ -9,6 +9,7 @@ pub const VALID_TOOLS: &[&str] = &[
     "shell", "read_file", "write_file", "http_get",
     "update_context", "set_reminder", "send_message",
     "create_project", "switch_project", "update_project_context",
+    "spawn_specialist",
 ];
 
 const SELECT_AGENT: &str =
