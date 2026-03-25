@@ -8,6 +8,7 @@ use tokio::time::{timeout, Duration};
 
 use crate::sandbox::{SandboxOptions, SandboxResult};
 
+#[allow(dead_code)] // Called from main.rs at startup (inlined there), kept as public utility
 pub async fn check_docker_available() -> bool {
     match Docker::connect_with_local_defaults() {
         Ok(docker) => docker.ping().await.is_ok(),

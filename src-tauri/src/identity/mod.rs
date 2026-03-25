@@ -3,6 +3,7 @@ pub mod registry;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // private_key stored for future message signing (v0.2 multiplayer)
 pub struct Agent {
     pub id: String,
     pub name: String,

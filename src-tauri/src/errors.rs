@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 #[derive(Error, Debug)]
+#[allow(dead_code)] // Variants exist for API completeness; not all used in v0.1
 pub enum GreenCubeError {
     // Database errors
     #[error("Database error: {0}")]

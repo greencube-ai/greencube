@@ -11,7 +11,7 @@ use crate::permissions;
 use crate::permissions::audit;
 use crate::permissions::audit::AuditEntry;
 use crate::sandbox::docker as sandbox_docker;
-use crate::sandbox::{SandboxOptions, SandboxResult};
+use crate::sandbox::SandboxOptions;
 use crate::state::AppState;
 
 const MAX_TOOL_ITERATIONS: usize = 10;

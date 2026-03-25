@@ -7,9 +7,7 @@ use std::sync::Arc;
 use crate::identity::registry;
 use crate::identity::AgentResponse;
 use crate::memory::episodic;
-use crate::memory::Episode;
 use crate::permissions::audit;
-use crate::permissions::audit::AuditEntry;
 use crate::state::AppState;
 
 #[derive(Deserialize)]

@@ -44,7 +44,7 @@ npm install
 npm run tauri dev
 ```
 
-requires: Node 20+, Rust 1.77+, Docker (optional, for sandboxing)
+requires: Node 20+, Rust 1.77+, Docker (optional, for sandboxing). Windows also needs [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with "Desktop development with C++".
 
 ## tech stack
 

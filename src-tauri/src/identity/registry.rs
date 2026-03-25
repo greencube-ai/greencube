@@ -115,7 +115,7 @@ pub fn get_agent(conn: &Connection, id: &str) -> anyhow::Result<Option<Agent>> {
          FROM agents WHERE id = ?1",
     )?;
 
-    let mut agents = stmt
+    let agents = stmt
         .query_map(params![id], |row| {
             let tools_json: String = row.get(8)?;
             Ok(Agent {
@@ -145,7 +145,7 @@ pub fn get_agent_by_name(conn: &Connection, name: &str) -> anyhow::Result<Option
          FROM agents WHERE name = ?1",
     )?;
 
-    let mut agents = stmt
+    let agents = stmt
         .query_map(params![name], |row| {
             let tools_json: String = row.get(8)?;
             Ok(Agent {

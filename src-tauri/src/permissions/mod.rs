@@ -3,12 +3,14 @@ pub mod audit;
 use crate::identity::Agent;
 
 /// Available tools in v0.1
+#[allow(dead_code)] // Used by identity::registry::VALID_TOOLS; kept here for API reference
 pub const AVAILABLE_TOOLS: &[&str] = &["shell", "read_file", "write_file", "http_get"];
 
 pub fn check_tool_permission(agent: &Agent, tool_name: &str) -> bool {
     agent.tools_allowed.iter().any(|t| t == tool_name)
 }
 
+#[allow(dead_code)] // Will be used when spending caps are enforced in completions proxy
 pub fn check_spending_cap(agent: &Agent, additional_cents: i64) -> bool {
     if agent.max_spend_cents == 0 {
         return true; // 0 = unlimited
