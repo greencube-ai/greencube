@@ -57,6 +57,9 @@ fn run_migrations(conn: &Connection) -> anyhow::Result<()> {
     if version < 4 {
         migrate_v3_to_v4(conn)?;
     }
+    if version < 5 {
+        migrate_v4_to_v5(conn)?;
+    }
     Ok(())
 }
 
@@ -318,6 +321,89 @@ fn migrate_v3_to_v4(conn: &Connection) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// v4 → v5: Journal, competence map, feedback, projects, patterns
+fn migrate_v4_to_v5(conn: &Connection) -> anyhow::Result<()> {
+    conn.execute_batch(
+        r#"
+        -- Daily journal (narrative synthesis)
+        CREATE TABLE IF NOT EXISTS journal_entries (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            date TEXT NOT NULL,
+            content TEXT NOT NULL,
+            task_count INTEGER NOT NULL DEFAULT 0,
+            highlights TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE,
+            UNIQUE(agent_id, date)
+        );
+
+        -- Competence map (domain-specific confidence)
+        CREATE TABLE IF NOT EXISTS competence_map (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            domain TEXT NOT NULL,
+            confidence REAL NOT NULL DEFAULT 0.5,
+            task_count INTEGER NOT NULL DEFAULT 0,
+            success_count INTEGER NOT NULL DEFAULT 0,
+            last_assessed TEXT NOT NULL,
+            trend TEXT NOT NULL DEFAULT 'stable',
+            FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE,
+            UNIQUE(agent_id, domain)
+        );
+
+        -- Feedback signals (praise/correction)
+        CREATE TABLE IF NOT EXISTS feedback_signals (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            signal_type TEXT NOT NULL,
+            content TEXT NOT NULL,
+            source_task_id TEXT,
+            created_at TEXT NOT NULL,
+            applied INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_feedback_agent ON feedback_signals(agent_id, created_at DESC);
+
+        -- Project workspaces
+        CREATE TABLE IF NOT EXISTS projects (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            context TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE,
+            UNIQUE(agent_id, name)
+        );
+
+        -- Task patterns (anticipation)
+        CREATE TABLE IF NOT EXISTS task_patterns (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            pattern_description TEXT NOT NULL,
+            frequency INTEGER NOT NULL DEFAULT 1,
+            last_seen TEXT NOT NULL,
+            preparation_note TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+        );
+    "#,
+    )?;
+
+    // Add project_id to knowledge if not present
+    let has_project_id: bool = conn.prepare("SELECT project_id FROM knowledge LIMIT 0").is_ok();
+    if !has_project_id {
+        conn.execute_batch("ALTER TABLE knowledge ADD COLUMN project_id TEXT REFERENCES projects(id);")?;
+    }
+
+    set_version(conn, 5)?;
+    tracing::info!("Database migrated to v5");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -353,13 +439,19 @@ mod tests {
         // v4 tables
         assert!(tables.contains(&"task_queue".to_string()));
         assert!(tables.contains(&"messages".to_string()));
+        // v5 tables
+        assert!(tables.contains(&"journal_entries".to_string()));
+        assert!(tables.contains(&"competence_map".to_string()));
+        assert!(tables.contains(&"feedback_signals".to_string()));
+        assert!(tables.contains(&"projects".to_string()));
+        assert!(tables.contains(&"task_patterns".to_string()));
     }
 
     #[test]
-    fn test_schema_version_is_4() {
+    fn test_schema_version_is_5() {
         let conn = init_memory_database().expect("init");
         let version = get_version(&conn).expect("version");
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
     }
 
     #[test]
@@ -375,7 +467,7 @@ mod tests {
         run_migrations(&conn).expect("first");
         // Running again should be a no-op (version is already 3)
         run_migrations(&conn).expect("second should not fail");
-        assert_eq!(get_version(&conn).expect("v"), 4);
+        assert_eq!(get_version(&conn).expect("v"), 5);
     }
 
     #[test]

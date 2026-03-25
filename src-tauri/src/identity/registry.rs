@@ -5,7 +5,11 @@ use rusqlite::{params, Connection};
 use crate::identity::Agent;
 
 /// Valid tool names in v0.2
-pub const VALID_TOOLS: &[&str] = &["shell", "read_file", "write_file", "http_get", "update_context", "set_reminder", "send_message"];
+pub const VALID_TOOLS: &[&str] = &[
+    "shell", "read_file", "write_file", "http_get",
+    "update_context", "set_reminder", "send_message",
+    "create_project", "switch_project", "update_project_context",
+];
 
 const SELECT_AGENT: &str =
     "SELECT id, name, created_at, updated_at, status, system_prompt, public_key, private_key, tools_allowed, max_spend_cents, total_tasks, successful_tasks, total_spend_cents, provider_id, dynamic_profile";
