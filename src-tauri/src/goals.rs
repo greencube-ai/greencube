@@ -151,7 +151,10 @@ If nothing comes to mind, respond: NONE"#,
         .header("Authorization", format!("Bearer {}", provider.api_key))
         .json(&serde_json::json!({
             "model": provider.default_model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [
+                {"role": "system", "content": crate::commandments::AGENT_COMMANDMENTS},
+                {"role": "user", "content": prompt}
+            ],
             "max_tokens": 300,
             "temperature": 0.5,
         }))

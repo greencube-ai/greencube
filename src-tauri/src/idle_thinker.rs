@@ -88,8 +88,12 @@ pub async fn run_idle_thinker(state: Arc<AppState>) {
                 active_goals.iter().map(|g| format!("- {}", g.content)).collect::<Vec<_>>().join("\n")
             };
 
+            let time_context = crate::time_sense::time_context_for_agent(&agent.updated_at);
+
             let prompt = format!(
-                r#"You are currently idle. No one has asked you anything.
+                r#"{}
+
+You are currently idle. No one has asked you anything.
 Review what you know and think independently.
 
 Your knowledge base:
@@ -115,6 +119,7 @@ Format your thoughts:
 
 If you have nothing to think about, respond: IDLE
 Max 3 thoughts per cycle."#,
+                time_context,
                 knowledge_text,
                 if context.is_empty() { "None set." } else { &context },
                 goals_text,
@@ -126,7 +131,10 @@ Max 3 thoughts per cycle."#,
                 .header("Authorization", format!("Bearer {}", provider.api_key))
                 .json(&serde_json::json!({
                     "model": provider.default_model,
-                    "messages": [{"role": "user", "content": prompt}],
+                    "messages": [
+                        {"role": "system", "content": crate::commandments::AGENT_COMMANDMENTS},
+                        {"role": "user", "content": prompt}
+                    ],
                     "max_tokens": 400,
                     "temperature": 0.7,
                 }))

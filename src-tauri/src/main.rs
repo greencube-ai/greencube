@@ -1,7 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod agent_messages;
 mod api;
 mod capabilities;
+mod commandments;
 mod commands;
 mod config;
 mod context;
@@ -20,6 +22,8 @@ mod providers;
 mod reflection;
 mod sandbox;
 mod state;
+mod task_queue;
+mod time_sense;
 mod tool_memory;
 
 use config::config_dir;
@@ -115,10 +119,22 @@ fn main() {
                     .expect("API server crashed");
             });
 
+            // Clean up old queue tasks on startup
+            {
+                let db_ref = tauri::async_runtime::block_on(async { state.db.lock().await });
+                let _ = task_queue::cleanup_old_tasks(&db_ref);
+            }
+
             // Spawn idle thinker background loop
             let idle_state = state.clone();
             tauri::async_runtime::spawn(async move {
                 idle_thinker::run_idle_thinker(idle_state).await;
+            });
+
+            // Spawn task queue processor
+            let queue_state = state.clone();
+            tauri::async_runtime::spawn(async move {
+                task_queue::run_queue_processor(queue_state).await;
             });
 
             Ok(())
@@ -135,6 +151,7 @@ fn main() {
             commands::get_docker_status,
             commands::get_server_info,
             commands::reset_app,
+            commands::get_agent_messages,
             commands::get_goals,
             commands::get_metrics,
             commands::get_idle_thoughts,

@@ -54,6 +54,9 @@ fn run_migrations(conn: &Connection) -> anyhow::Result<()> {
     if version < 3 {
         migrate_v2_to_v3(conn)?;
     }
+    if version < 4 {
+        migrate_v3_to_v4(conn)?;
+    }
     Ok(())
 }
 
@@ -274,6 +277,47 @@ fn migrate_v2_to_v3(conn: &Connection) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// v3 → v4: Task queue, agent messages, time features
+fn migrate_v3_to_v4(conn: &Connection) -> anyhow::Result<()> {
+    conn.execute_batch(
+        r#"
+        -- Task queue for auto-resume and commitments
+        CREATE TABLE IF NOT EXISTS task_queue (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            messages_json TEXT NOT NULL,
+            provider_id TEXT,
+            resume_at TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'queued',
+            retry_count INTEGER NOT NULL DEFAULT 0,
+            error_info TEXT,
+            source TEXT NOT NULL DEFAULT 'rate_limit',
+            prompt TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_task_queue_status ON task_queue(status, resume_at);
+
+        -- Agent-to-agent messages
+        CREATE TABLE IF NOT EXISTS messages (
+            id TEXT PRIMARY KEY,
+            from_agent_id TEXT NOT NULL,
+            to_agent_id TEXT NOT NULL,
+            content TEXT NOT NULL,
+            message_type TEXT NOT NULL DEFAULT 'request',
+            response_content TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (from_agent_id) REFERENCES agents(id) ON DELETE CASCADE,
+            FOREIGN KEY (to_agent_id) REFERENCES agents(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_messages_agents ON messages(from_agent_id, to_agent_id, created_at DESC);
+    "#,
+    )?;
+    set_version(conn, 4)?;
+    tracing::info!("Database migrated to v4");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -306,13 +350,16 @@ mod tests {
         assert!(tables.contains(&"notifications".to_string()));
         assert!(tables.contains(&"agent_metrics".to_string()));
         assert!(tables.contains(&"agent_capabilities".to_string()));
+        // v4 tables
+        assert!(tables.contains(&"task_queue".to_string()));
+        assert!(tables.contains(&"messages".to_string()));
     }
 
     #[test]
-    fn test_schema_version_is_3() {
+    fn test_schema_version_is_4() {
         let conn = init_memory_database().expect("init");
         let version = get_version(&conn).expect("version");
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
     }
 
     #[test]
@@ -328,7 +375,7 @@ mod tests {
         run_migrations(&conn).expect("first");
         // Running again should be a no-op (version is already 3)
         run_migrations(&conn).expect("second should not fail");
-        assert_eq!(get_version(&conn).expect("v"), 3);
+        assert_eq!(get_version(&conn).expect("v"), 4);
     }
 
     #[test]

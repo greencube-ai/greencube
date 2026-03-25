@@ -129,6 +129,15 @@ pub async fn reset_app(_state: State<'_, Arc<AppState>>) -> Result<()> {
     Ok(())
 }
 
+// ─── Message Commands ────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn get_agent_messages(agent_id: String, limit: Option<i64>, state: State<'_, Arc<AppState>>) -> Result<Vec<crate::agent_messages::AgentMessage>> {
+    let db = state.db.lock().await;
+    crate::agent_messages::get_messages(&db, &agent_id, limit.unwrap_or(50))
+        .map_err(|e| GreenCubeError::Internal(e.to_string()))
+}
+
 // ─── Goal Commands ──────────────────────────────────────────────────────────
 
 #[tauri::command]

@@ -65,7 +65,10 @@ Describe: what this agent is good at, typical work patterns, and any preferences
         .header("Content-Type", "application/json")
         .json(&serde_json::json!({
             "model": provider.default_model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [
+                {"role": "system", "content": crate::commandments::AGENT_COMMANDMENTS},
+                {"role": "user", "content": prompt}
+            ],
             "max_tokens": 200,
             "temperature": 0.3,
         }))

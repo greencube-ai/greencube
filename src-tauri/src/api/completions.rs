@@ -107,6 +107,11 @@ pub async fn chat_completions(
     emit_status(&state, &agent.id, "active");
     emit_refresh(&state);
 
+    // 3a. INJECT COMMANDMENTS (always first, non-negotiable)
+    if let Some(messages) = body["messages"].as_array_mut() {
+        crate::commandments::inject_commandments(messages);
+    }
+
     // 3b. INJECT WORKING CONTEXT (scratchpad) + DYNAMIC PROFILE
     if let Some(messages) = body["messages"].as_array_mut() {
         let mut injections = Vec::new();
@@ -261,6 +266,29 @@ pub async fn chat_completions(
                 }
                 return error_response(StatusCode::UNAUTHORIZED, "Invalid API key. Update your key in Settings.");
             }
+
+            // 429 Rate Limited — pass through error AND queue retry internally
+            if llm_status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                let retry_after: u64 = 60; // Default retry in 60 seconds
+                let messages_json = serde_json::to_string(&body["messages"]).unwrap_or_default();
+                let _ = crate::task_queue::queue_rate_limited(
+                    &db, &agent.id, &messages_json, agent.provider_id.as_deref(), retry_after,
+                );
+                let _ = registry::update_agent_status(&db, &agent.id, "queued");
+                emit_status(&state, &agent.id, "queued");
+                let _ = crate::notifications::create_notification(
+                    &db, &agent.id,
+                    &format!("Rate limited. I'll retry automatically in {} seconds.", retry_after),
+                    "alert", "task_queue"
+                );
+                if let Some(handle) = &state.app_handle {
+                    let _ = handle.emit("notification-new", serde_json::json!({"agent_id": &agent.id}));
+                }
+                emit_refresh(&state);
+                // Pass through the 429 to the client as-is
+                return error_response(StatusCode::TOO_MANY_REQUESTS, &format!("Rate limited. GreenCube will retry automatically in {} seconds.", retry_after));
+            }
+
             return error_response(StatusCode::BAD_GATEWAY, &format!("LLM API returned {}. {}", llm_status, error_text));
         }
 
@@ -683,6 +711,38 @@ async fn execute_tool_call(state: &AppState, agent_id: &str, tool_name: &str, ar
             match crate::context::set_context(&db, agent_id, content) {
                 Ok(()) => "Context updated successfully.".into(),
                 Err(e) => format!("Error updating context: {}", e),
+            }
+        }
+        "set_reminder" => {
+            let prompt = match arguments["prompt"].as_str() {
+                Some(p) => p,
+                None => return "Error: set_reminder requires 'prompt' argument".into(),
+            };
+            let minutes = arguments["minutes_from_now"].as_i64().unwrap_or(60);
+            let provider_id = {
+                let db = state.db.lock().await;
+                let agent = crate::identity::registry::get_agent(&db, agent_id).ok().flatten();
+                agent.and_then(|a| a.provider_id)
+            };
+            let db = state.db.lock().await;
+            match crate::task_queue::queue_reminder(&db, agent_id, prompt, minutes, provider_id.as_deref()) {
+                Ok(_) => format!("Reminder set. I will execute '{}' in {} minutes.", prompt, minutes),
+                Err(e) => format!("Error setting reminder: {}", e),
+            }
+        }
+        "send_message" => {
+            let to_name = match arguments["to"].as_str() {
+                Some(t) => t,
+                None => return "Error: send_message requires 'to' argument (agent name)".into(),
+            };
+            let content = match arguments["content"].as_str() {
+                Some(c) => c,
+                None => return "Error: send_message requires 'content' argument".into(),
+            };
+            let depth = arguments["_depth"].as_u64().unwrap_or(0) as u32;
+            match crate::agent_messages::send_message(state, agent_id, to_name, content, depth).await {
+                Ok(response) => format!("Response from {}: {}", to_name, response),
+                Err(e) => format!("Error sending message to {}: {}", to_name, e),
             }
         }
         _ => format!("Error: unknown tool '{}'", tool_name),
