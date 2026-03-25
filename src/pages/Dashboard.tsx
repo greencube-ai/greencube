@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { getActivityFeed, getServerInfo } from '../lib/invoke';
-import { onActivityUpdate, onAgentStatusChange } from '../lib/events';
+import { onActivityRefresh, onAgentStatusChange } from '../lib/events';
 import { AgentCard } from '../components/AgentCard';
 import { ActivityFeed } from '../components/ActivityFeed';
 import { CreateAgentModal } from '../components/CreateAgentModal';
@@ -16,6 +16,16 @@ export function Dashboard() {
   const [showCreate, setShowCreate] = useState(false);
   const [activity, setActivity] = useState<AuditEntry[]>([]);
   const [apiPort, setApiPort] = useState(9000);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Debounced refresh — batches rapid signals into a single fetch
+  const debouncedRefresh = useCallback(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      getActivityFeed(50).then(setActivity).catch(console.error);
+      refreshAgents();
+    }, 500);
+  }, [refreshAgents]);
 
   // Load activity feed + server port
   useEffect(() => {
@@ -25,17 +35,18 @@ export function Dashboard() {
 
   // Listen for real-time events
   useEffect(() => {
-    const unlistenActivity = onActivityUpdate((entry) => {
-      setActivity((prev) => [entry, ...prev].slice(0, 100));
+    const unlistenRefresh = onActivityRefresh(() => {
+      debouncedRefresh();
     });
     const unlistenStatus = onAgentStatusChange((data) => {
       dispatch({ type: 'UPDATE_AGENT_STATUS', id: data.id, status: data.status });
     });
     return () => {
-      unlistenActivity.then((fn) => fn());
+      unlistenRefresh.then((fn) => fn());
       unlistenStatus.then((fn) => fn());
+      if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [dispatch]);
+  }, [dispatch, debouncedRefresh]);
 
   // Cmd/Ctrl+N to create new agent
   useEffect(() => {
@@ -51,26 +62,19 @@ export function Dashboard() {
 
   const agentNames: Record<string, string> = {};
   state.agents.forEach((a) => { agentNames[a.id] = a.name; });
-
   const hasApiKey = state.config?.llm.api_key && state.config.llm.api_key.length > 0;
 
   return (
     <div>
-      {/* Docker warning banner */}
       {!state.dockerAvailable && (
         <div
           className="mb-4 px-4 py-2.5 rounded-lg text-sm border"
-          style={{
-            backgroundColor: 'rgba(234, 179, 8, 0.08)',
-            borderColor: 'rgba(234, 179, 8, 0.25)',
-            color: '#eab308',
-          }}
+          style={{ backgroundColor: 'rgba(234, 179, 8, 0.08)', borderColor: 'rgba(234, 179, 8, 0.25)', color: '#eab308' }}
         >
           Docker not detected. Tool execution is disabled.
         </div>
       )}
 
-      {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-bold">Dashboard</h1>
         <button
@@ -85,10 +89,7 @@ export function Dashboard() {
 
       {state.agents.length === 0 ? (
         <div className="mt-16">
-          <EmptyState
-            message="No agents yet"
-            subtitle="They won't build themselves... or will they?"
-          />
+          <EmptyState message="No agents yet" subtitle="They won't build themselves... or will they?" />
           <div className="text-center mt-6">
             <button
               onClick={() => setShowCreate(true)}
@@ -102,28 +103,16 @@ export function Dashboard() {
       ) : (
         <>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-            {/* Agent cards */}
             <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
               {state.agents.map((agent) => (
-                <AgentCard
-                  key={agent.id}
-                  agent={agent}
-                  onClick={() => navigate(`/agent/${agent.id}`)}
-                />
+                <AgentCard key={agent.id} agent={agent} onClick={() => navigate(`/agent/${agent.id}`)} />
               ))}
             </div>
-
-            {/* Activity feed */}
-            <div
-              className="rounded-lg border p-4"
-              style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border)' }}
-            >
+            <div className="rounded-lg border p-4" style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border)' }}>
               <h2 className="text-sm font-medium text-[var(--text-secondary)] mb-3">Activity</h2>
               <ActivityFeed entries={activity} agentNames={agentNames} />
             </div>
           </div>
-
-          {/* Chat panel */}
           <ChatPanel agents={state.agents} apiPort={apiPort} hasApiKey={!!hasApiKey} />
         </>
       )}

@@ -27,3 +27,9 @@ export function onToast(
     callback(event.payload);
   });
 }
+
+export function onActivityRefresh(callback: () => void): Promise<UnlistenFn> {
+  return listen('activity-refresh', () => {
+    callback();
+  });
+}

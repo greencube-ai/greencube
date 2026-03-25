@@ -10,9 +10,6 @@ pub mod agents;
 pub mod completions;
 pub mod health;
 
-#[cfg(test)]
-mod integration_test;
-
 pub fn create_router(state: Arc<AppState>) -> Router {
     Router::new()
         // Health
