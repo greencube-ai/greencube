@@ -14,6 +14,8 @@ pub struct LlmConfig {
     pub api_base_url: String,
     pub api_key: String,
     pub default_model: String,
+    #[serde(default)]
+    pub memory_injection_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,6 +45,7 @@ impl Default for AppConfig {
                 api_base_url: "https://api.openai.com/v1".into(),
                 api_key: String::new(),
                 default_model: "gpt-4o".into(),
+                memory_injection_enabled: false,
             },
             server: ServerConfig {
                 host: "127.0.0.1".into(),

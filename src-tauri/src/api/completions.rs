@@ -120,18 +120,20 @@ pub async fn chat_completions(
         }));
     }
 
-    // 4. INJECT MEMORIES
-    if let Some(messages) = body["messages"].as_array_mut() {
-        // Get last user message for memory retrieval
-        if let Some(last_user_msg) = messages
-            .iter()
-            .rev()
-            .find(|m| m["role"] == "user")
-            .and_then(|m| m["content"].as_str())
-        {
-            let db = state.db.lock().await;
-            if let Ok(memories) = episodic::recall_relevant_episodes(&db, &agent.id, last_user_msg, 5) {
-                inject_memories(messages, &memories);
+    // 4. INJECT MEMORIES (only if enabled in config)
+    let memory_enabled = state.config.read().await.llm.memory_injection_enabled;
+    if memory_enabled {
+        if let Some(messages) = body["messages"].as_array_mut() {
+            if let Some(last_user_msg) = messages
+                .iter()
+                .rev()
+                .find(|m| m["role"] == "user")
+                .and_then(|m| m["content"].as_str())
+            {
+                let db = state.db.lock().await;
+                if let Ok(memories) = episodic::recall_relevant_episodes(&db, &agent.id, last_user_msg, 5) {
+                    inject_memories(messages, &memories);
+                }
             }
         }
     }

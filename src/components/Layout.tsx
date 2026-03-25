@@ -45,7 +45,7 @@ export function Layout({ children }: LayoutProps) {
       >
         {/* Logo */}
         <div className="p-4 flex items-center gap-2.5">
-          <div className="w-3.5 h-3.5 rounded-sm logo-glow" style={{ backgroundColor: 'var(--accent)' }} />
+          <div className="w-3.5 h-3.5 rounded-sm logo-glow" style={{ border: '2px solid var(--accent)', backgroundColor: 'transparent' }} />
           <span className="text-lg font-bold text-[var(--text-primary)]">GreenCube</span>
         </div>
 

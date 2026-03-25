@@ -96,6 +96,23 @@ export function Settings() {
               className="w-full"
             />
           </div>
+          <div className="flex items-start gap-3 mt-4">
+            <input
+              type="checkbox"
+              id="memory-injection"
+              checked={config.llm.memory_injection_enabled}
+              onChange={(e) => update('llm.memory_injection_enabled', e.target.checked)}
+              className="w-4 h-4 mt-0.5 accent-[var(--accent)]"
+            />
+            <div>
+              <label htmlFor="memory-injection" className="text-sm text-[var(--text-secondary)] cursor-pointer">
+                Auto-inject memories
+              </label>
+              <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
+                Experimental. Injects relevant past memories into agent context. May increase token usage.
+              </p>
+            </div>
+          </div>
         </div>
       </section>
 

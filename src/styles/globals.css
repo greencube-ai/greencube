@@ -103,9 +103,9 @@ button {
   animation: fadeStep 0.35s ease-out;
 }
 
-/* Logo glow effect */
+/* Logo glow effect — subtle glow around the outline square */
 .logo-glow {
-  box-shadow: 0 0 12px rgba(34, 197, 94, 0.4), 0 0 4px rgba(34, 197, 94, 0.2);
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.3), 0 0 2px rgba(34, 197, 94, 0.15);
 }
 
 /* Toast notification enter */

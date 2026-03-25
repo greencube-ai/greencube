@@ -71,7 +71,7 @@ export function OnboardingModal() {
         {step === 1 && (
           <div className="onboarding-step">
             <div className="flex items-center gap-3 mb-3">
-              <div className="w-5 h-5 rounded-md logo-glow" style={{ backgroundColor: 'var(--accent)' }} />
+              <div className="w-5 h-5 rounded-md logo-glow" style={{ border: '2px solid var(--accent)', backgroundColor: 'transparent' }} />
               <h1 className="text-2xl font-bold">Welcome to GreenCube</h1>
             </div>
             <p className="text-base text-[var(--text-secondary)] mb-8">

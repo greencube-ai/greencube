@@ -45,6 +45,7 @@ export interface AppConfig {
     api_base_url: string;
     api_key: string;
     default_model: string;
+    memory_injection_enabled: boolean;
   };
   server: {
     host: string;

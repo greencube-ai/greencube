@@ -92,6 +92,7 @@ fn create_test_state(mock_llm_url: &str) -> Arc<crate::state::AppState> {
     let mut config = crate::config::AppConfig::default();
     config.llm.api_base_url = mock_llm_url.into();
     config.llm.api_key = "test-key-12345".into();
+    config.llm.memory_injection_enabled = true; // Enable for integration tests
 
     Arc::new(crate::state::AppState {
         db: tokio::sync::Mutex::new(conn),
