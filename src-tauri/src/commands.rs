@@ -115,17 +115,42 @@ pub async fn get_server_info(state: State<'_, Arc<AppState>>) -> Result<serde_js
 }
 
 #[tauri::command]
-pub async fn reset_app(_state: State<'_, Arc<AppState>>) -> Result<()> {
-    let data_dir = crate::config::config_dir();
-    if data_dir.exists() {
-        std::fs::remove_dir_all(&data_dir)
-            .map_err(|e| GreenCubeError::Internal(format!("Failed to delete data: {}", e)))?;
+pub async fn reset_app(state: State<'_, Arc<AppState>>) -> Result<()> {
+    // Drop all data by wiping tables (can't delete the db file while it's open on Windows)
+    {
+        let db = state.db.lock().await;
+        db.execute_batch(
+            "DELETE FROM audit_log;
+             DELETE FROM episodes;
+             DELETE FROM knowledge;
+             DELETE FROM tool_results;
+             DELETE FROM feedback_signals;
+             DELETE FROM agent_context;
+             DELETE FROM competence_map;
+             DELETE FROM notifications;
+             DELETE FROM agent_lineage;
+             DELETE FROM response_ratings;
+             DELETE FROM token_usage;
+             DELETE FROM task_queue;
+             DELETE FROM goals;
+             DELETE FROM growth_metrics;
+             DELETE FROM capabilities;
+             DELETE FROM messages;
+             DELETE FROM agents;
+             DELETE FROM providers;
+             DELETE FROM config_store;"
+        ).map_err(|e| GreenCubeError::Internal(format!("Failed to clear data: {}", e)))?;
     }
-    std::fs::create_dir_all(&data_dir)
-        .map_err(|e| GreenCubeError::Internal(format!("Failed to recreate dir: {}", e)))?;
+
+    // Reset config to defaults (triggers onboarding)
     let default_config = AppConfig::default();
     crate::config::save_config(&default_config)
         .map_err(|e| GreenCubeError::Internal(e.to_string()))?;
+
+    // Update in-memory config
+    let mut config = state.config.write().await;
+    *config = default_config;
+
     Ok(())
 }
 
