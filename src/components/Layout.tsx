@@ -9,9 +9,9 @@ interface LayoutProps {
 }
 
 const navItems = [
-  { path: '/', label: 'Dashboard', icon: '◻' },
-  { path: '/connect', label: 'Connect', icon: '⚡' },
-  { path: '/settings', label: 'Settings', icon: '⚙' },
+  { path: '/', label: 'Dashboard' },
+  { path: '/connect', label: 'Connect' },
+  { path: '/settings', label: 'Settings' },
 ];
 
 export function Layout({ children }: LayoutProps) {
@@ -69,7 +69,6 @@ export function Layout({ children }: LayoutProps) {
                 }`}
                 style={isActive ? { backgroundColor: 'var(--accent-subtle)' } : undefined}
               >
-                <span>{item.icon}</span>
                 {item.label}
               </button>
             );

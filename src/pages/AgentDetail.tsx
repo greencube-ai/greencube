@@ -47,7 +47,7 @@ export function AgentDetail() {
     return (
       <div>
         <button onClick={() => navigate('/')} className="text-sm text-[var(--text-muted)] mb-4 hover:text-[var(--text-primary)]">
-          ← Dashboard
+          Back to Dashboard
         </button>
         <p className="text-[var(--status-error)]">{error}</p>
       </div>
@@ -74,7 +74,7 @@ export function AgentDetail() {
         onClick={() => navigate('/')}
         className="text-sm text-[var(--text-muted)] mb-4 hover:text-[var(--text-primary)]"
       >
-        ← Dashboard
+        Back to Dashboard
       </button>
 
       {/* Agent header */}
