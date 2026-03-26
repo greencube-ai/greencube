@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getAgent, getEpisodes, getAuditLog } from '../lib/invoke';
+import { getAgent, getEpisodes, getAuditLog, getKnowledge } from '../lib/invoke';
 import { onActivityUpdate } from '../lib/events';
 import { StatusBadge } from '../components/StatusBadge';
 import { MemoryViewer } from '../components/MemoryViewer';
 import { AuditLog } from '../components/AuditLog';
-import type { Agent, Episode, AuditEntry } from '../lib/types';
+import { KnowledgeList } from '../components/KnowledgeList';
+import type { Agent, Episode, AuditEntry, KnowledgeEntry } from '../lib/types';
 
-type Tab = 'overview' | 'memory' | 'audit';
+type Tab = 'overview' | 'memory' | 'knowledge' | 'audit';
 
 export function AgentDetail() {
   const { id } = useParams<{ id: string }>();
@@ -15,16 +16,18 @@ export function AgentDetail() {
   const [agent, setAgent] = useState<Agent | null>(null);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
+  const [knowledge, setKnowledge] = useState<KnowledgeEntry[]>([]);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (!id) return;
-    Promise.all([getAgent(id), getEpisodes(id), getAuditLog(id)])
-      .then(([a, e, au]) => {
+    Promise.all([getAgent(id), getEpisodes(id), getAuditLog(id), getKnowledge(id)])
+      .then(([a, e, au, k]) => {
         setAgent(a);
         setEpisodes(e);
         setAuditEntries(au);
+        setKnowledge(k);
       })
       .catch((e) => setError(String(e)));
   }, [id]);
@@ -36,6 +39,7 @@ export function AgentDetail() {
         setAuditEntries((prev) => [entry, ...prev].slice(0, 100));
         getAgent(id).then(setAgent).catch(console.error);
         getEpisodes(id).then(setEpisodes).catch(console.error);
+        getKnowledge(id).then(setKnowledge).catch(console.error);
       }
     });
     return () => { unlisten.then((fn) => fn()); };
@@ -63,6 +67,7 @@ export function AgentDetail() {
   const tabs: { key: Tab; label: string; count?: number }[] = [
     { key: 'overview', label: 'Overview' },
     { key: 'memory', label: 'Memory', count: episodes.length },
+    { key: 'knowledge', label: 'Knowledge', count: knowledge.length },
     { key: 'audit', label: 'Audit Log', count: auditEntries.length },
   ];
 
@@ -175,6 +180,7 @@ export function AgentDetail() {
       )}
 
       {activeTab === 'memory' && <MemoryViewer episodes={episodes} />}
+      {activeTab === 'knowledge' && <KnowledgeList entries={knowledge} />}
       {activeTab === 'audit' && <AuditLog entries={auditEntries} />}
     </div>
   );
