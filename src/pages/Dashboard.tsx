@@ -31,10 +31,10 @@ export function Dashboard() {
     getServerInfo().then((info) => setApiPort(info.port)).catch(() => {});
     const interval = setInterval(() => {
       getActivityFeed(50).then(setActivity).catch(console.error);
-      refreshAgents();
     }, 5000);
     return () => clearInterval(interval);
-  }, [refreshAgents]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const unlistenRefresh = onActivityRefresh(() => {

@@ -35,10 +35,10 @@ export function Layout({ children }: LayoutProps) {
   }, []);
 
   return (
-    <div className="flex min-h-screen">
-      {/* Sidebar */}
+    <div className="flex h-screen overflow-hidden">
+      {/* Sidebar — fixed, never scrolls */}
       <aside
-        className="w-56 flex-shrink-0 flex flex-col border-r"
+        className="w-56 flex-shrink-0 flex flex-col border-r h-screen"
         style={{
           backgroundColor: 'var(--bg-secondary)',
           borderColor: 'var(--border)',
@@ -92,9 +92,9 @@ export function Layout({ children }: LayoutProps) {
         </div>
       </aside>
 
-      {/* Main content with page transition */}
-      <main className="flex-1 overflow-y-auto">
-        <div key={location.pathname} className="page-enter px-8 py-6">
+      {/* Main content — scrolls independently, sidebar stays fixed */}
+      <main className="flex-1 overflow-y-auto h-screen">
+        <div className="px-8 py-6">
           {children}
         </div>
       </main>
