@@ -56,6 +56,36 @@ export function Settings() {
     <div className="max-w-2xl">
       <h1 className="text-xl font-bold mb-6">Settings</h1>
 
+      {/* Agent Mode */}
+      <section className="mb-8">
+        <h2 className="text-base font-medium mb-2 text-[var(--text-secondary)]">Agent Mode</h2>
+        <div
+          className="rounded-lg border p-4"
+          style={{ backgroundColor: 'var(--bg-secondary)', borderColor: config.ui.alive_mode ? 'var(--accent)' : 'var(--border)' }}
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-medium">{config.ui.alive_mode ? 'Alive Mode' : 'Core Mode'}</div>
+              <p className="text-[10px] text-[var(--text-muted)] mt-1 max-w-md">
+                {config.ui.alive_mode
+                  ? 'Reflection, idle thinking, knowledge extraction, goals, and notifications are active. Uses background tokens.'
+                  : 'Proxy, memory, audit, and sandbox only. Zero background token usage.'}
+              </p>
+            </div>
+            <button
+              onClick={() => update('ui.alive_mode', !config.ui.alive_mode)}
+              className="px-3 py-1.5 rounded-md text-xs font-medium border transition"
+              style={config.ui.alive_mode
+                ? { borderColor: 'var(--accent)', color: 'var(--accent)', backgroundColor: 'var(--accent-subtle)' }
+                : { borderColor: 'var(--border)', color: 'var(--text-secondary)' }
+              }
+            >
+              {config.ui.alive_mode ? 'Switch to Core' : 'Switch to Alive'}
+            </button>
+          </div>
+        </div>
+      </section>
+
       {/* LLM Configuration */}
       <section className="mb-8">
         <h2 className="text-base font-medium mb-4 text-[var(--text-secondary)]">LLM Configuration</h2>
@@ -202,7 +232,7 @@ export function Settings() {
       <section className="mb-8">
         <h2 className="text-base font-medium mb-4 text-[var(--text-secondary)]">About</h2>
         <div className="text-sm text-[var(--text-muted)] space-y-1">
-          <div>Version: 0.1.0</div>
+          <div>Version: 0.7.0</div>
           <div className="flex items-center gap-2">
             Docker:{' '}
             <span style={{ color: dockerAvailable ? 'var(--status-active)' : 'var(--status-error)' }}>

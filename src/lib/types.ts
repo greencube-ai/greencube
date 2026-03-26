@@ -63,6 +63,7 @@ export interface AppConfig {
   };
   ui: {
     onboarding_complete: boolean;
+    alive_mode: boolean;
   };
 }
 

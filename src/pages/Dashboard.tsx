@@ -27,11 +27,16 @@ export function Dashboard() {
     }, 500);
   }, [refreshAgents]);
 
-  // Load activity feed + server port
+  // Load activity feed + server port, poll every 5s as fallback
   useEffect(() => {
     getActivityFeed(50).then(setActivity).catch(console.error);
     getServerInfo().then((info) => setApiPort(info.port)).catch(() => {});
-  }, []);
+    const interval = setInterval(() => {
+      getActivityFeed(50).then(setActivity).catch(console.error);
+      refreshAgents();
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [refreshAgents]);
 
   // Listen for real-time events
   useEffect(() => {

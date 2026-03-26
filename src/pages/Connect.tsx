@@ -153,7 +153,7 @@ agent = Agent(
     }
   };
 
-  const tabs: Tab[] = ['python', 'javascript', 'curl', 'langchain', 'crewai'];
+  const tabs: Tab[] = ['openclaw', 'python', 'javascript', 'curl', 'langchain', 'crewai'];
 
   return (
     <div className="max-w-3xl">
