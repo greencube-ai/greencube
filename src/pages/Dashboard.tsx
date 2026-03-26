@@ -18,23 +18,31 @@ export function Dashboard() {
   const [apiPort, setApiPort] = useState(9000);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Only update activity state if data actually changed (prevents scroll reset)
+  const activityRef = useRef<string>('');
+  const updateActivity = useCallback((entries: AuditEntry[]) => {
+    const key = entries.length > 0 ? entries[0].id + entries.length : '';
+    if (key !== activityRef.current) {
+      activityRef.current = key;
+      setActivity(entries);
+    }
+  }, []);
+
   const debouncedRefresh = useCallback(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      getActivityFeed(50).then(setActivity).catch(console.error);
-      refreshAgents();
+      getActivityFeed(50).then(updateActivity).catch(console.error);
     }, 500);
-  }, [refreshAgents]);
+  }, [updateActivity]);
 
   useEffect(() => {
-    getActivityFeed(50).then(setActivity).catch(console.error);
+    getActivityFeed(50).then(updateActivity).catch(console.error);
     getServerInfo().then((info) => setApiPort(info.port)).catch(() => {});
     const interval = setInterval(() => {
-      getActivityFeed(50).then(setActivity).catch(console.error);
+      getActivityFeed(50).then(updateActivity).catch(console.error);
     }, 5000);
     return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [updateActivity]);
 
   useEffect(() => {
     const unlistenRefresh = onActivityRefresh(() => {
