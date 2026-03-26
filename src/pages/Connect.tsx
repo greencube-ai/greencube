@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { getServerInfo } from '../lib/invoke';
+import { ChatPanel } from '../components/ChatPanel';
 
 type Tab = 'openclaw' | 'python' | 'javascript' | 'curl' | 'langchain' | 'crewai';
 
@@ -250,6 +251,21 @@ agent = Agent(
               <pre className="text-[10px] font-mono text-[var(--text-secondary)] overflow-auto max-h-48">{testResult.response}</pre>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Interactive test — for developers who want to try a full conversation */}
+      {state.agents.length > 0 && (
+        <div className="mt-10 pt-8 border-t" style={{ borderColor: 'var(--border)' }}>
+          <h2 className="text-base font-medium text-[var(--text-secondary)] mb-1">Interactive Test</h2>
+          <p className="text-xs text-[var(--text-muted)] mb-4">
+            Send messages directly to verify your agent is working through GreenCube.
+          </p>
+          <ChatPanel
+            agents={state.agents}
+            apiPort={port}
+            hasApiKey={true}
+          />
         </div>
       )}
     </div>

@@ -9,7 +9,7 @@ interface LayoutProps {
 }
 
 const navItems = [
-  { path: '/', label: 'Dashboard' },
+  { path: '/', label: 'Habitat' },
   { path: '/connect', label: 'Connect' },
   { path: '/settings', label: 'Settings' },
 ];

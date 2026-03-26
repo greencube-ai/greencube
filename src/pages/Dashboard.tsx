@@ -6,7 +6,6 @@ import { onActivityRefresh, onAgentStatusChange } from '../lib/events';
 import { AgentCard } from '../components/AgentCard';
 import { ActivityFeed } from '../components/ActivityFeed';
 import { CreateAgentModal } from '../components/CreateAgentModal';
-import { ChatPanel } from '../components/ChatPanel';
 import { EmptyState } from '../components/EmptyState';
 import type { AuditEntry } from '../lib/types';
 
@@ -18,7 +17,6 @@ export function Dashboard() {
   const [apiPort, setApiPort] = useState(9000);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Only update activity state if data actually changed (prevents scroll reset)
   const activityRef = useRef<string>('');
   const updateActivity = useCallback((entries: AuditEntry[]) => {
     const key = entries.length > 0 ? entries[0].id + entries.length : '';
@@ -45,9 +43,7 @@ export function Dashboard() {
   }, [updateActivity]);
 
   useEffect(() => {
-    const unlistenRefresh = onActivityRefresh(() => {
-      debouncedRefresh();
-    });
+    const unlistenRefresh = onActivityRefresh(() => { debouncedRefresh(); });
     const unlistenStatus = onAgentStatusChange((data) => {
       dispatch({ type: 'UPDATE_AGENT_STATUS', id: data.id, status: data.status });
     });
@@ -71,7 +67,8 @@ export function Dashboard() {
 
   const agentNames: Record<string, string> = {};
   state.agents.forEach((a) => { agentNames[a.id] = a.name; });
-  const hasApiKey = state.config?.llm.api_key && state.config.llm.api_key.length > 0;
+  const activeCount = state.agents.filter(a => a.status === 'active').length;
+  const totalTasks = state.agents.reduce((sum, a) => sum + a.total_tasks, 0);
 
   return (
     <div>
@@ -84,11 +81,15 @@ export function Dashboard() {
         </div>
       )}
 
+      {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-bold mb-1">Dashboard</h1>
+          <h1 className="text-2xl font-bold mb-1">Habitat</h1>
           <p className="text-xs text-[var(--text-muted)]">
-            {state.agents.length} agent{state.agents.length !== 1 ? 's' : ''} registered
+            {state.agents.length} agent{state.agents.length !== 1 ? 's' : ''}
+            {activeCount > 0 && <span style={{ color: 'var(--accent)' }}> / {activeCount} active</span>}
+            {totalTasks > 0 && <span> / {totalTasks} total tasks</span>}
+            <span> / localhost:{apiPort}</span>
           </p>
         </div>
         <button
@@ -104,8 +105,8 @@ export function Dashboard() {
       {state.agents.length === 0 ? (
         <div className="mt-12">
           <EmptyState
-            message="No agents yet"
-            subtitle="Create your first agent to get started. They'll remember everything."
+            message="Your habitat is empty"
+            subtitle="Create an agent. Connect it via the Connect page. Watch it grow."
           />
           <div className="text-center mt-8">
             <button
@@ -118,35 +119,41 @@ export function Dashboard() {
           </div>
         </div>
       ) : (
-        <>
-          {/* Chat panel first — this is the main action */}
-          <ChatPanel agents={state.agents} apiPort={apiPort} hasApiKey={!!hasApiKey} />
-
-          {/* Agents + Activity below */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mt-6">
-            <div className="lg:col-span-2">
-              <h2 className="text-sm font-medium text-[var(--text-secondary)] mb-3">Agents</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {state.agents.map((agent) => (
-                  <AgentCard key={agent.id} agent={agent} onClick={() => navigate(`/agent/${agent.id}`)} />
-                ))}
-              </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Agent cards */}
+          <div className="lg:col-span-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {state.agents.map((agent) => (
+                <AgentCard key={agent.id} agent={agent} onClick={() => navigate(`/agent/${agent.id}`)} />
+              ))}
             </div>
-            <div>
-              <h2 className="text-sm font-medium text-[var(--text-secondary)] mb-3">Activity</h2>
-              <div
-                className="rounded-xl border p-4"
-                style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border)' }}
-              >
+          </div>
+
+          {/* Live activity stream */}
+          <div>
+            <div
+              className="rounded-xl border overflow-hidden"
+              style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border)' }}
+            >
+              <div className="px-4 py-3 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
+                <span className="text-sm font-medium text-[var(--text-secondary)]">Live</span>
+                {activity.length > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-1.5 h-1.5 rounded-full status-pulse" style={{ backgroundColor: 'var(--accent)' }} />
+                    <span className="text-[10px] text-[var(--text-muted)]">{activity.length} events</span>
+                  </div>
+                )}
+              </div>
+              <div className="p-3">
                 <ActivityFeed
                   entries={activity}
                   agentNames={agentNames}
-                  emptyMessage="Send a message to see activity here"
+                  emptyMessage="Waiting for activity"
                 />
               </div>
             </div>
           </div>
-        </>
+        </div>
       )}
 
       <CreateAgentModal
