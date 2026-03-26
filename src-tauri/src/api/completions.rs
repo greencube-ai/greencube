@@ -614,11 +614,6 @@ async fn stream_llm_response(
                     let reflection_enabled = config.llm.self_reflection_enabled;
                     drop(config);
 
-                    tracing::info!(
-                        "stream [DONE]: alive_mode={}, reflection_enabled={}",
-                        alive_mode, reflection_enabled
-                    );
-
                     if alive_mode {
                         let (total_tasks, active_goal_count) = {
                             let db = state_clone.db.lock().await;
@@ -629,11 +624,6 @@ async fn stream_llm_response(
 
                         let should_reflect = reflection_enabled && original_messages.len() >= 2
                             && (total_tasks == 1 || total_tasks % 3 == 0);
-
-                        tracing::info!(
-                            "stream [DONE]: total_tasks={}, should_reflect={}",
-                            total_tasks, should_reflect
-                        );
 
                         if should_reflect {
                             crate::reflection::spawn_reflection(
@@ -762,12 +752,6 @@ async fn finish_task(
     let reflection_enabled = config.llm.self_reflection_enabled;
     drop(config);
 
-    tracing::info!(
-        "finish_task: success={}, alive_mode={}, reflection_enabled={}, has_provider={}, has_messages={}",
-        success, alive_mode, reflection_enabled,
-        provider.is_some(), messages.is_some()
-    );
-
     if success && alive_mode {
         if let (Some(provider), Some(msgs)) = (provider, messages) {
             let (total_tasks, active_goal_count) = {
@@ -776,12 +760,6 @@ async fn finish_task(
                 let goals = crate::goals::count_active_goals(&db, agent_id).unwrap_or(0);
                 (total, goals)
             };
-
-            tracing::info!(
-                "finish_task: total_tasks={}, msgs_len={}, should_reflect={}",
-                total_tasks, msgs.len(),
-                reflection_enabled && msgs.len() >= 2 && (total_tasks == 1 || total_tasks % 3 == 0)
-            );
 
             // Reflection: every 3rd task, every failed task, or first task ever (bootstrap)
             let should_reflect = reflection_enabled && msgs.len() >= 2
