@@ -20,7 +20,6 @@ export function ChatPanel({ agents, apiPort, hasApiKey }: ChatPanelProps) {
   // Per-agent chat history: Record<agentId, ChatMessage[]>
   const [chatHistories, setChatHistories] = useState<Record<string, ChatMessage[]>>({});
   const [loading, setLoading] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const messages = chatHistories[selectedAgentId] || [];
@@ -35,10 +34,6 @@ export function ChatPanel({ agents, apiPort, hasApiKey }: ChatPanelProps) {
     },
     [selectedAgentId]
   );
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
 
   useEffect(() => {
     if (!selectedAgentId && agents.length > 0) {
@@ -215,7 +210,6 @@ export function ChatPanel({ agents, apiPort, hasApiKey }: ChatPanelProps) {
             </div>
           </div>
         ))}
-        <div ref={messagesEndRef} />
       </div>
 
       {/* Input */}
