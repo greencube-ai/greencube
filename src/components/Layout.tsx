@@ -46,22 +46,10 @@ export function Layout({ children }: LayoutProps) {
       >
         {/* Logo */}
         <div className="p-4 flex items-center gap-2.5">
-          <svg width="20" height="20" viewBox="0 0 512 512" className="logo-glow" style={{ borderRadius: '3px' }}>
-            {/* Dark body */}
-            <polygon points="48,200 256,80 256,320 48,440" fill="#111"/>
-            <polygon points="48,200 256,320 464,200 256,80" fill="#111"/>
-            <polygon points="256,80 464,200 464,440 256,320" fill="#111"/>
-            {/* Green face (front-left) */}
-            <polygon points="48,200 256,80 256,320 48,440" fill="#22C55E" opacity="0.9"/>
-            {/* Orange face (top) */}
-            <polygon points="48,200 256,320 464,200 256,80" fill="#F97316" opacity="0.9"/>
-            {/* White face (right) */}
-            <polygon points="256,80 464,200 464,440 256,320" fill="#F5F5F5" opacity="0.9"/>
-            {/* Grid lines */}
-            <line x1="117" y1="240" x2="256" y2="160" stroke="#111" strokeWidth="4" opacity="0.4"/>
-            <line x1="186" y1="280" x2="256" y2="240" stroke="#111" strokeWidth="4" opacity="0.4"/>
-            <line x1="326" y1="160" x2="256" y2="240" stroke="#111" strokeWidth="4" opacity="0.4"/>
-            <line x1="395" y1="200" x2="256" y2="280" stroke="#111" strokeWidth="4" opacity="0.4"/>
+          <svg width="20" height="20" viewBox="0 0 512 512" className="logo-glow">
+            <polygon points="256,80 56,196 56,432 256,316" fill="#22C55E"/>
+            <polygon points="256,80 456,196 456,432 256,316" fill="#1BA34E"/>
+            <polygon points="256,80 56,196 256,316 456,196" fill="#34D36E"/>
           </svg>
           <span className="text-lg font-bold text-[var(--text-primary)]">GreenCube</span>
         </div>
