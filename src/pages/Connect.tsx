@@ -9,7 +9,7 @@ export function Connect() {
   const { state } = useApp();
   const [port, setPort] = useState(9000);
   const [selectedAgentId, setSelectedAgentId] = useState('');
-  const [activeTab, setActiveTab] = useState<Tab>('openclaw');
+  const [activeTab, setActiveTab] = useState<Tab>('python');
   const [testResult, setTestResult] = useState<{ request: string; response: string } | null>(null);
   const [testing, setTesting] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -154,32 +154,47 @@ agent = Agent(
     }
   };
 
-  const tabs: Tab[] = ['openclaw', 'python', 'javascript', 'curl', 'langchain', 'crewai'];
+  // OpenClaw is shown as a hero section above. Other frameworks in tabs below.
+
+  const otherTabs: Tab[] = ['python', 'javascript', 'curl', 'langchain', 'crewai'];
 
   return (
     <div className="max-w-3xl">
-      <h1 className="text-2xl font-bold mb-2">Connect an Agent</h1>
-      <p className="text-sm text-[var(--text-secondary)] mb-8">
-        Point any agent framework at <span className="font-mono text-[var(--accent)]">localhost:{port}</span> and it instantly gets memory, safety, and an audit trail.
+      <h1 className="text-2xl font-bold mb-2">Connect</h1>
+      <p className="text-sm text-[var(--text-muted)] mb-8">
+        One line. Your agent gets memory, safety, and an audit trail.
       </p>
 
-      {/* How it works */}
-      <div className="grid grid-cols-3 gap-4 mb-10">
-        {[
-          { step: '1', title: 'Open GreenCube', desc: 'The API starts automatically' },
-          { step: '2', title: 'Change one line', desc: 'Point your agent at localhost' },
-          { step: '3', title: 'Done', desc: 'Memory, sandbox, and audit trail' },
-        ].map((item) => (
-          <div
-            key={item.step}
-            className="p-4 rounded-xl border text-center"
-            style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border)' }}
+      {/* OpenClaw — THE main integration, massive and impossible to miss */}
+      <div
+        className="rounded-xl border p-6 mb-8"
+        style={{ backgroundColor: 'rgba(34, 197, 94, 0.03)', borderColor: 'var(--accent)' }}
+      >
+        <div className="flex items-center gap-2 mb-4">
+          <span className="text-lg font-bold">OpenClaw</span>
+          <span className="px-2 py-0.5 rounded text-[10px] font-medium" style={{ backgroundColor: 'var(--accent-subtle)', color: 'var(--accent)' }}>
+            recommended
+          </span>
+        </div>
+
+        <p className="text-sm text-[var(--text-secondary)] mb-4">Add this to your environment before running OpenClaw:</p>
+
+        <div className="relative rounded-lg overflow-hidden mb-3" style={{ backgroundColor: 'var(--bg-primary)' }}>
+          <button
+            onClick={() => handleCopy(`export OPENAI_API_BASE=http://localhost:${port}/v1`)}
+            className="absolute top-2 right-2 px-2 py-1 rounded text-[10px] border transition-colors"
+            style={{ borderColor: 'var(--border)', color: 'var(--text-muted)', backgroundColor: 'var(--bg-secondary)' }}
           >
-            <div className="text-2xl font-bold mb-2" style={{ color: 'var(--accent)' }}>{item.step}</div>
-            <div className="text-sm font-medium mb-1">{item.title}</div>
-            <div className="text-[10px] text-[var(--text-muted)]">{item.desc}</div>
-          </div>
-        ))}
+            {copied ? 'Copied!' : 'Copy'}
+          </button>
+          <pre className="p-4 text-sm font-mono" style={{ color: 'var(--accent)' }}>
+{`export OPENAI_API_BASE=http://localhost:${port}/v1`}
+          </pre>
+        </div>
+
+        <p className="text-xs text-[var(--text-muted)]">
+          That's it. Run your OpenClaw agent normally. GreenCube proxies every request, adds memory, logs everything.
+        </p>
       </div>
 
       {/* Agent selector */}
@@ -194,9 +209,10 @@ agent = Agent(
         </div>
       )}
 
-      {/* Code tabs */}
+      {/* Other frameworks — smaller, below */}
+      <div className="text-xs text-[var(--text-muted)] uppercase tracking-wide mb-3">Other frameworks</div>
       <div className="flex gap-1 mb-4 border-b" style={{ borderColor: 'var(--border)' }}>
-        {tabs.map((tab) => (
+        {otherTabs.map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
