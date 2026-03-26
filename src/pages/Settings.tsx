@@ -73,7 +73,17 @@ export function Settings() {
               </p>
             </div>
             <button
-              onClick={() => update('ui.alive_mode', !config.ui.alive_mode)}
+              onClick={async () => {
+                const newConfig = JSON.parse(JSON.stringify(config)) as AppConfig;
+                newConfig.ui.alive_mode = !config.ui.alive_mode;
+                setConfig(newConfig);
+                try {
+                  await saveConfig(newConfig);
+                  dispatch({ type: 'SET_CONFIG', config: newConfig });
+                } catch (e) {
+                  console.error('Failed to save alive mode:', e);
+                }
+              }}
               className="px-3 py-1.5 rounded-md text-xs font-medium border transition"
               style={config.ui.alive_mode
                 ? { borderColor: 'var(--accent)', color: 'var(--accent)', backgroundColor: 'var(--accent-subtle)' }
