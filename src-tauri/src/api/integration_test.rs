@@ -343,6 +343,6 @@ async fn test_health_endpoint() {
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["status"], "ok");
-    assert_eq!(body["version"], "0.1.0");
+    assert_eq!(body["version"], "0.7.0");
     assert_eq!(body["docker_available"], false); // No Docker in tests
 }

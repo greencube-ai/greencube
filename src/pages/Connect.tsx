@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { getServerInfo } from '../lib/invoke';
 
-type Tab = 'python' | 'javascript' | 'curl' | 'langchain' | 'crewai';
+type Tab = 'python' | 'javascript' | 'curl' | 'langchain' | 'crewai' | 'openclaw';
 
 export function Connect() {
   const { state } = useApp();
@@ -96,6 +96,30 @@ agent = Agent(
 )
 
 # CrewAI will route through GreenCube automatically`,
+    },
+    openclaw: {
+      label: 'OpenClaw',
+      code: `# Option 1: Environment variable
+export OPENAI_API_BASE=http://localhost:${port}/v1
+export OPENAI_API_KEY=any
+
+# Then run your OpenClaw agent normally.
+# All requests route through GreenCube automatically.
+
+# Option 2: In OpenClaw config
+# Set the model endpoint to:
+#   http://localhost:${port}/v1/chat/completions
+#
+# GreenCube is OpenAI-compatible so any framework
+# that supports custom API endpoints works.
+
+# Option 3: In Python with OpenClaw
+import os
+os.environ["OPENAI_API_BASE"] = "http://localhost:${port}/v1"
+os.environ["OPENAI_API_KEY"] = "any"
+
+# Then import and use OpenClaw as normal.
+# Your agent now has memory, sandbox, and audit.`,
     },
   };
 

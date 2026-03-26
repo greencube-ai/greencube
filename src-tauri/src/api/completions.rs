@@ -131,6 +131,16 @@ pub async fn chat_completions(
             tokens_used: 0,
             cost_cents: 0,
         });
+        // Also log to audit_log so it shows in Activity Feed
+        let _ = audit::log_action(&db, &AuditEntry {
+            id: uuid::Uuid::new_v4().to_string(),
+            agent_id: agent.id.clone(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            action_type: "task_start".into(),
+            action_detail: redact_secrets(&format!("Task started: {}", user_message_summary)),
+            permission_result: "allowed".into(),
+            result: None, duration_ms: None, cost_cents: 0, error: None,
+        });
     }
     emit_status(&state, &agent.id, "active");
     emit_refresh(&state);
@@ -337,7 +347,7 @@ pub async fn chat_completions(
             total_cost += tokens / 100;
         }
 
-        // Log LLM response episode
+        // Log LLM response episode + audit entry
         let response_content = response_body["choices"][0]["message"]["content"].as_str().unwrap_or("").chars().take(200).collect::<String>();
         let response_summary = if response_content.is_empty() {
             format!("LLM responded with tool calls (iteration {})", iteration)
@@ -349,10 +359,17 @@ pub async fn chat_completions(
             let _ = episodic::insert_episode(&db, &Episode {
                 id: uuid::Uuid::new_v4().to_string(), agent_id: agent.id.clone(),
                 created_at: chrono::Utc::now().to_rfc3339(), event_type: "llm_response".into(),
-                summary: response_summary,
+                summary: response_summary.clone(),
                 raw_data: Some(serde_json::to_string(&response_body).unwrap_or_default()),
                 task_id: Some(task_id.clone()), outcome: Some("success".into()),
                 tokens_used: total_tokens, cost_cents: total_cost,
+            });
+            let _ = audit::log_action(&db, &AuditEntry {
+                id: uuid::Uuid::new_v4().to_string(), agent_id: agent.id.clone(),
+                created_at: chrono::Utc::now().to_rfc3339(), action_type: "llm_response".into(),
+                action_detail: redact_secrets(&response_summary),
+                permission_result: "allowed".into(),
+                result: None, duration_ms: None, cost_cents: total_cost, error: None,
             });
         }
         emit_refresh(&state);
@@ -467,14 +484,22 @@ async fn stream_llm_response(
             Ok(response_body) => {
                 let content = response_body["choices"][0]["message"]["content"].as_str().unwrap_or("").to_string();
                 {
+                    let summary = format!("LLM: {}", content.chars().take(200).collect::<String>());
                     let db = state.db.lock().await;
                     let _ = episodic::insert_episode(&db, &Episode {
                         id: uuid::Uuid::new_v4().to_string(), agent_id: agent_id.into(),
                         created_at: chrono::Utc::now().to_rfc3339(), event_type: "llm_response".into(),
-                        summary: format!("LLM: {}", content.chars().take(200).collect::<String>()),
+                        summary: summary.clone(),
                         raw_data: Some(serde_json::to_string(&response_body).unwrap_or_default()),
                         task_id: Some(task_id.into()), outcome: Some("success".into()),
                         tokens_used: 0, cost_cents: 0,
+                    });
+                    let _ = audit::log_action(&db, &AuditEntry {
+                        id: uuid::Uuid::new_v4().to_string(), agent_id: agent_id.into(),
+                        created_at: chrono::Utc::now().to_rfc3339(), action_type: "llm_response".into(),
+                        action_detail: redact_secrets(&summary),
+                        permission_result: "allowed".into(),
+                        result: None, duration_ms: None, cost_cents: 0, error: None,
                     });
                     let _ = registry::update_agent_status(&db, agent_id, "idle");
                     let _ = registry::increment_task_counts(&db, agent_id, true, 0);
@@ -484,6 +509,13 @@ async fn stream_llm_response(
                         summary: "Task completed successfully".into(), raw_data: None,
                         task_id: Some(task_id.into()), outcome: Some("success".into()),
                         tokens_used: 0, cost_cents: 0,
+                    });
+                    let _ = audit::log_action(&db, &AuditEntry {
+                        id: uuid::Uuid::new_v4().to_string(), agent_id: agent_id.into(),
+                        created_at: chrono::Utc::now().to_rfc3339(), action_type: "task_end".into(),
+                        action_detail: "Task completed successfully".into(),
+                        permission_result: "allowed".into(),
+                        result: None, duration_ms: None, cost_cents: 0, error: None,
                     });
                 }
                 emit_status(&state, agent_id, "idle");
@@ -535,9 +567,16 @@ async fn stream_llm_response(
                         let _ = episodic::insert_episode(&db, &Episode {
                             id: uuid::Uuid::new_v4().to_string(), agent_id: agent_id_owned.clone(),
                             created_at: chrono::Utc::now().to_rfc3339(), event_type: "llm_response".into(),
-                            summary, raw_data: Some(accumulated_content.clone()),
+                            summary: summary.clone(), raw_data: Some(accumulated_content.clone()),
                             task_id: Some(task_id_owned.clone()), outcome: Some("success".into()),
                             tokens_used: 0, cost_cents: 0,
+                        });
+                        let _ = audit::log_action(&db, &AuditEntry {
+                            id: uuid::Uuid::new_v4().to_string(), agent_id: agent_id_owned.clone(),
+                            created_at: chrono::Utc::now().to_rfc3339(), action_type: "llm_response".into(),
+                            action_detail: redact_secrets(&summary),
+                            permission_result: "allowed".into(),
+                            result: None, duration_ms: None, cost_cents: 0, error: None,
                         });
                         let _ = registry::update_agent_status(&db, &agent_id_owned, "idle");
                         let _ = registry::increment_task_counts(&db, &agent_id_owned, true, 0);
@@ -547,6 +586,13 @@ async fn stream_llm_response(
                             summary: "Task completed successfully".into(), raw_data: None,
                             task_id: Some(task_id_owned.clone()), outcome: Some("success".into()),
                             tokens_used: 0, cost_cents: 0,
+                        });
+                        let _ = audit::log_action(&db, &AuditEntry {
+                            id: uuid::Uuid::new_v4().to_string(), agent_id: agent_id_owned.clone(),
+                            created_at: chrono::Utc::now().to_rfc3339(), action_type: "task_end".into(),
+                            action_detail: "Task completed successfully".into(),
+                            permission_result: "allowed".into(),
+                            result: None, duration_ms: None, cost_cents: 0, error: None,
                         });
                     }
                     if let Some(handle) = &state_clone.app_handle {
@@ -616,17 +662,27 @@ async fn finish_task(
         let db = state.db.lock().await;
         let _ = registry::update_agent_status(&db, agent_id, "idle");
         let _ = registry::increment_task_counts(&db, agent_id, success, cost_cents);
+        let summary: String = if success { "Task completed successfully" } else { "Task completed with errors" }.into();
         let _ = episodic::insert_episode(&db, &Episode {
             id: uuid::Uuid::new_v4().to_string(),
             agent_id: agent_id.into(),
             created_at: chrono::Utc::now().to_rfc3339(),
             event_type: "task_end".into(),
-            summary: if success { "Task completed successfully" } else { "Task completed with errors" }.into(),
+            summary: summary.clone(),
             raw_data: None,
             task_id: Some(task_id.into()),
             outcome: Some(if success { "success" } else { "failure" }.into()),
             tokens_used: 0,
             cost_cents,
+        });
+        let _ = audit::log_action(&db, &AuditEntry {
+            id: uuid::Uuid::new_v4().to_string(),
+            agent_id: agent_id.into(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            action_type: "task_end".into(),
+            action_detail: summary,
+            permission_result: "allowed".into(),
+            result: None, duration_ms: None, cost_cents, error: None,
         });
     }
 
