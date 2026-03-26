@@ -39,6 +39,23 @@ fn error_response(status: StatusCode, msg: &str) -> Response {
     (status, Json(serde_json::json!({ "error": msg }))).into_response()
 }
 
+/// SECURITY: Redact sensitive patterns from strings before logging to audit/episodes.
+/// Catches Bearer tokens, API keys, passwords, and Authorization headers.
+fn redact_secrets(s: &str) -> String {
+    use std::sync::LazyLock;
+    static RE: LazyLock<Vec<(regex::Regex, &'static str)>> = LazyLock::new(|| vec![
+        (regex::Regex::new(r"(?i)(bearer\s+)[a-zA-Z0-9_\-\.]+").unwrap(), "${1}[REDACTED]"),
+        (regex::Regex::new(r"(?i)(api[_-]?key[=:\s]+)[a-zA-Z0-9_\-\.]+").unwrap(), "${1}[REDACTED]"),
+        (regex::Regex::new(r"(?i)(authorization[=:\s]+)[^\s,\}]+").unwrap(), "${1}[REDACTED]"),
+        (regex::Regex::new(r"sk-[a-zA-Z0-9]{20,}").unwrap(), "[REDACTED_KEY]"),
+    ]);
+    let mut result = s.to_string();
+    for (re, replacement) in RE.iter() {
+        result = re.replace_all(&result, *replacement).to_string();
+    }
+    result
+}
+
 pub async fn chat_completions(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -76,6 +93,17 @@ pub async fn chat_completions(
             }
         }
     };
+
+    // 2a. SPENDING CAP CHECK
+    if agent.max_spend_cents > 0 && agent.total_spend_cents >= agent.max_spend_cents {
+        return error_response(
+            StatusCode::FORBIDDEN,
+            &format!(
+                "Agent '{}' has reached its spending cap ({} cents spent of {} cents allowed). Increase the cap in Settings.",
+                agent.name, agent.total_spend_cents, agent.max_spend_cents
+            ),
+        );
+    }
 
     // 3. LOG TASK START
     let task_id = uuid::Uuid::new_v4().to_string();
@@ -352,7 +380,7 @@ pub async fn chat_completions(
                     let _ = audit::log_action(&db, &AuditEntry {
                         id: uuid::Uuid::new_v4().to_string(), agent_id: agent.id.clone(),
                         created_at: chrono::Utc::now().to_rfc3339(), action_type: "tool_call".into(),
-                        action_detail: serde_json::json!({"tool": func_name, "arguments": func_args}).to_string(),
+                        action_detail: redact_secrets(&serde_json::json!({"tool": func_name, "arguments": func_args}).to_string()),
                         permission_result: if permissions::check_tool_permission(&agent, func_name) { "allowed" } else { "denied" }.into(),
                         result: None, duration_ms: None, cost_cents: 0, error: None,
                     });
@@ -719,7 +747,12 @@ async fn execute_tool_call(state: &AppState, agent_id: &str, tool_name: &str, ar
                 Some(c) => c,
                 None => return "Error: write_file requires 'content' argument".into(),
             };
-            execute_shell(state, &format!("cat > {} << 'GREENCUBE_EOF'\n{}\nGREENCUBE_EOF", sandbox_docker::shell_escape(path), content)).await
+            // SECURITY: Use base64 encoding to prevent here-doc injection.
+            // If content contained 'GREENCUBE_EOF', it would break out of the heredoc
+            // and execute arbitrary commands. Base64 eliminates this entirely.
+            use base64::Engine;
+            let encoded = base64::engine::general_purpose::STANDARD.encode(content.as_bytes());
+            execute_shell(state, &format!("echo {} | base64 -d > {}", encoded, sandbox_docker::shell_escape(path))).await
         }
         "http_get" => {
             let url = match arguments["url"].as_str() {
@@ -838,6 +871,40 @@ fn inject_memories(messages: &mut Vec<serde_json::Value>, memories: &[Episode]) 
         }
     } else {
         messages.insert(0, serde_json::json!({"role": "system", "content": injection}));
+    }
+}
+
+#[cfg(test)]
+mod security_tests {
+    use super::redact_secrets;
+
+    #[test]
+    fn test_redact_bearer_token() {
+        let input = r#"curl -H "Authorization: Bearer sk-abc123def456""#;
+        let result = redact_secrets(input);
+        assert!(!result.contains("sk-abc123def456"), "Bearer token not redacted: {}", result);
+        assert!(result.contains("[REDACTED"), "Missing redaction marker: {}", result);
+    }
+
+    #[test]
+    fn test_redact_api_key_pattern() {
+        let input = "api_key=sk-proj-abcdefghijklmnopqrstuvwxyz";
+        let result = redact_secrets(input);
+        assert!(!result.contains("abcdefghijklmnopqrstuvwxyz"), "API key not redacted: {}", result);
+    }
+
+    #[test]
+    fn test_redact_sk_prefix() {
+        let input = "Using key sk-1234567890abcdefghij1234567890 for requests";
+        let result = redact_secrets(input);
+        assert!(result.contains("[REDACTED_KEY]"), "sk- pattern not redacted: {}", result);
+    }
+
+    #[test]
+    fn test_no_false_positive_on_normal_text() {
+        let input = "This is a normal shell command: ls -la /tmp";
+        let result = redact_secrets(input);
+        assert_eq!(result, input, "Normal text was modified");
     }
 }
 

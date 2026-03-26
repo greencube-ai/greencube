@@ -14,6 +14,7 @@ use crate::providers;
 use crate::state::AppState;
 
 const MAX_CHILDREN: i64 = 3;
+const MAX_TOTAL_AGENTS: i64 = 10; // SECURITY: Global cap on total agents to prevent runaway spawning
 const MIN_DOMAIN_TASKS: i64 = 8;
 const MAX_COMPETENCE_FOR_SPAWN: f64 = 0.55;
 const MIN_TOTAL_TASKS: i64 = 20;
@@ -25,8 +26,31 @@ pub struct LineageInfo {
 }
 
 /// Check if an agent can spawn (used by both idle thinker and tool).
+/// SECURITY: Checks both per-agent child limit AND global agent cap.
+/// Also prevents children from spawning (no recursive spawning in v0.7).
 pub fn can_spawn(conn: &Connection, agent_id: &str) -> bool {
-    count_children(conn, agent_id) < MAX_CHILDREN
+    // Prevent children from spawning their own children
+    let is_child: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM agent_lineage WHERE child_id = ?1",
+        params![agent_id],
+        |row| row.get(0),
+    ).unwrap_or(false);
+    if is_child {
+        return false;
+    }
+
+    // Per-agent child limit
+    if count_children(conn, agent_id) >= MAX_CHILDREN {
+        return false;
+    }
+
+    // Global agent cap
+    let total_agents: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM agents",
+        [],
+        |row| row.get(0),
+    ).unwrap_or(0);
+    total_agents < MAX_TOTAL_AGENTS
 }
 
 pub fn count_children(conn: &Connection, parent_id: &str) -> i64 {
@@ -352,5 +376,35 @@ mod tests {
         let child_lineage = get_lineage(&conn, &child.id);
         assert!(child_lineage.parent.is_some());
         assert_eq!(child_lineage.children.len(), 0);
+    }
+
+    #[test]
+    fn test_child_cannot_spawn() {
+        // SECURITY: Children must not be able to spawn their own children
+        let conn = init_memory_database().expect("init");
+        let parent = registry::create_agent(&conn, "Dev", "", &["shell".into()]).expect("parent");
+        let child = registry::create_agent(&conn, "css-spec", "", &["shell".into()]).expect("child");
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO agent_lineage (id, parent_id, child_id, domain, knowledge_transferred, created_at) VALUES ('l1', ?1, ?2, 'css', 3, ?3)",
+            params![parent.id, child.id, now],
+        ).expect("insert");
+
+        // Parent can spawn (has fewer than MAX_CHILDREN)
+        assert!(can_spawn(&conn, &parent.id));
+        // Child CANNOT spawn (is itself a child)
+        assert!(!can_spawn(&conn, &child.id));
+    }
+
+    #[test]
+    fn test_global_agent_cap() {
+        // SECURITY: Total agents across the system must not exceed MAX_TOTAL_AGENTS
+        let conn = init_memory_database().expect("init");
+        // Create 10 agents (the global cap)
+        for i in 0..10 {
+            registry::create_agent(&conn, &format!("agent-{}", i), "", &["shell".into()]).expect("create");
+        }
+        // The first agent shouldn't be able to spawn because we're at the global cap
+        assert!(!can_spawn(&conn, "agent-0"));
     }
 }

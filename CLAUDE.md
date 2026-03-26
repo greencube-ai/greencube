@@ -39,16 +39,25 @@ Rust backend + React/TypeScript frontend + SQLite + Docker sandboxing.
 - Frontend components: src/components/
 - Shared types: src/lib/types.ts
 
-## Known Limitations (v0.1)
-- Private keys stored unencrypted in SQLite (encrypt in v0.2 via keyring crate)
-- API key stored in plaintext in config.toml (same as Cursor, Claude Desktop, etc.)
-- Keyword-based memory retrieval (semantic search in v0.2)
-- No human-in-the-loop approval flow (v0.2)
-- No agent-to-agent communication (v0.2)
-- No streaming responses (v0.2)
-- API server has no authentication (localhost-only binding)
-- No graceful shutdown / container cleanup on app close (v0.2)
-- No DELETE agent endpoint (v0.2)
+## Security Model
+- API server binds to 127.0.0.1 ONLY (never 0.0.0.0)
+- CORS restricted to localhost/tauri origins
+- Tool arguments redacted for secrets (Bearer tokens, API keys) before audit logging
+- write_file uses base64 encoding (not heredoc) to prevent shell injection
+- Inter-agent messages wrapped in untrusted-input boundary markers
+- Spawn depth limited: children cannot spawn, global cap of 10 agents
+- Request body limit: 10MB
+- Spending caps enforced before LLM calls
+- Docker sandbox: network disabled by default, CPU/memory limits enforced
+
+## Known Limitations
+- Private keys stored unencrypted in SQLite (encrypt via keyring crate in future)
+- API keys stored in plaintext in config.toml and providers table (same as Cursor, Claude Desktop, etc.)
+- Keyword-based memory retrieval (semantic search deferred)
+- No human-in-the-loop approval flow (binary allow/deny only)
+- API server has no authentication (localhost-only binding is the security boundary)
+- No rate limiting on API endpoints
 - Cost estimation is rough ($0.01/1K tokens) — don't trust cost numbers
 - Stop words list is English-only — memory recall may be poor in other languages
 - Reputation range is 0.1–0.9, not 0.0–1.0 (by design: regression to mean)
+- No encryption at rest for SQLite database
