@@ -531,6 +531,8 @@ async fn stream_llm_response(
     // SSE streaming path — forward chunks from LLM to client
     let agent_id_owned = agent_id.to_string();
     let task_id_owned = task_id.to_string();
+    let provider_clone = provider.clone();
+    let original_messages: Vec<serde_json::Value> = body["messages"].as_array().cloned().unwrap_or_default();
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<SseEvent, std::convert::Infallible>>(64);
 
     // Move Arc<AppState> into the spawned task
@@ -599,6 +601,65 @@ async fn stream_llm_response(
                         let _ = handle.emit("agent-status-change", serde_json::json!({"id": agent_id_owned, "status": "idle"}));
                         let _ = handle.emit("activity-refresh", ());
                     }
+
+                    // Record growth metrics
+                    {
+                        let db = state_clone.db.lock().await;
+                        let _ = crate::metrics::record_metric(&db, &agent_id_owned);
+                    }
+
+                    // Trigger background features (reflection, profile, goals, journal)
+                    let config = state_clone.config.read().await;
+                    let alive_mode = config.ui.alive_mode;
+                    let reflection_enabled = config.llm.self_reflection_enabled;
+                    drop(config);
+
+                    tracing::info!(
+                        "stream [DONE]: alive_mode={}, reflection_enabled={}",
+                        alive_mode, reflection_enabled
+                    );
+
+                    if alive_mode {
+                        let (total_tasks, active_goal_count) = {
+                            let db = state_clone.db.lock().await;
+                            let total = registry::get_agent(&db, &agent_id_owned).ok().flatten().map(|a| a.total_tasks).unwrap_or(0);
+                            let goals = crate::goals::count_active_goals(&db, &agent_id_owned).unwrap_or(0);
+                            (total, goals)
+                        };
+
+                        let should_reflect = reflection_enabled && original_messages.len() >= 2
+                            && (total_tasks == 1 || total_tasks % 3 == 0);
+
+                        tracing::info!(
+                            "stream [DONE]: total_tasks={}, should_reflect={}",
+                            total_tasks, should_reflect
+                        );
+
+                        if should_reflect {
+                            crate::reflection::spawn_reflection(
+                                state_clone.clone(), agent_id_owned.clone(), provider_clone.clone(),
+                                original_messages.clone(), task_id_owned.clone(),
+                            );
+                        }
+
+                        crate::profile::maybe_regenerate(
+                            state_clone.clone(), agent_id_owned.clone(), provider_clone.clone(), total_tasks,
+                        );
+
+                        crate::goals::maybe_generate_goals(
+                            state_clone.clone(), agent_id_owned.clone(), provider_clone.clone(),
+                            total_tasks, active_goal_count,
+                        );
+
+                        let db = state_clone.db.lock().await;
+                        if crate::journal::should_write_journal(&db, &agent_id_owned) {
+                            drop(db);
+                            crate::journal::spawn_journal_synthesis(
+                                state_clone.clone(), agent_id_owned.clone(), provider_clone.clone(),
+                            );
+                        }
+                    }
+
                     return; // Stream done
                 }
 
@@ -701,6 +762,12 @@ async fn finish_task(
     let reflection_enabled = config.llm.self_reflection_enabled;
     drop(config);
 
+    tracing::info!(
+        "finish_task: success={}, alive_mode={}, reflection_enabled={}, has_provider={}, has_messages={}",
+        success, alive_mode, reflection_enabled,
+        provider.is_some(), messages.is_some()
+    );
+
     if success && alive_mode {
         if let (Some(provider), Some(msgs)) = (provider, messages) {
             let (total_tasks, active_goal_count) = {
@@ -709,6 +776,12 @@ async fn finish_task(
                 let goals = crate::goals::count_active_goals(&db, agent_id).unwrap_or(0);
                 (total, goals)
             };
+
+            tracing::info!(
+                "finish_task: total_tasks={}, msgs_len={}, should_reflect={}",
+                total_tasks, msgs.len(),
+                reflection_enabled && msgs.len() >= 2 && (total_tasks == 1 || total_tasks % 3 == 0)
+            );
 
             // Reflection: every 3rd task, every failed task, or first task ever (bootstrap)
             let should_reflect = reflection_enabled && msgs.len() >= 2
