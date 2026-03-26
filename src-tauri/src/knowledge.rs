@@ -23,6 +23,7 @@ pub fn insert_knowledge(
 ) -> anyhow::Result<KnowledgeEntry> {
     let id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
+    tracing::info!("Knowledge extracted: [{}] {}", category, &content[..content.len().min(80)]);
     conn.execute(
         "INSERT INTO knowledge (id, agent_id, content, source_task_id, category, confidence, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5, 1.0, ?6)",

@@ -22,14 +22,10 @@ export function AgentDetail() {
 
   useEffect(() => {
     if (!id) return;
-    Promise.all([getAgent(id), getEpisodes(id), getAuditLog(id), getKnowledge(id)])
-      .then(([a, e, au, k]) => {
-        setAgent(a);
-        setEpisodes(e);
-        setAuditEntries(au);
-        setKnowledge(k);
-      })
-      .catch((e) => setError(String(e)));
+    getAgent(id).then(setAgent).catch((e) => setError(String(e)));
+    getEpisodes(id).then(setEpisodes).catch(console.error);
+    getAuditLog(id).then(setAuditEntries).catch(console.error);
+    getKnowledge(id).then(setKnowledge).catch(console.error);
   }, [id]);
 
   useEffect(() => {
