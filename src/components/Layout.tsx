@@ -94,7 +94,7 @@ export function Layout({ children }: LayoutProps) {
 
       {/* Main content with page transition */}
       <main className="flex-1 overflow-y-auto">
-        <div key={location.pathname} className="page-enter p-6">
+        <div key={location.pathname} className="page-enter px-8 py-6">
           {children}
         </div>
       </main>

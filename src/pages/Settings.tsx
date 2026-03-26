@@ -54,21 +54,23 @@ export function Settings() {
 
   return (
     <div className="max-w-2xl">
-      <h1 className="text-xl font-bold mb-6">Settings</h1>
+      <h1 className="text-2xl font-bold mb-8">Settings</h1>
 
-      {/* Agent Mode */}
-      <section className="mb-8">
-        <h2 className="text-base font-medium mb-2 text-[var(--text-secondary)]">Agent Mode</h2>
+      {/* Agent Mode — prominent card */}
+      <section className="mb-10">
         <div
-          className="rounded-lg border p-4"
-          style={{ backgroundColor: 'var(--bg-secondary)', borderColor: config.ui.alive_mode ? 'var(--accent)' : 'var(--border)' }}
+          className="rounded-xl border p-6 transition-all duration-300"
+          style={{
+            backgroundColor: config.ui.alive_mode ? 'rgba(34, 197, 94, 0.04)' : 'var(--bg-secondary)',
+            borderColor: config.ui.alive_mode ? 'var(--accent)' : 'var(--border)',
+          }}
         >
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-sm font-medium">{config.ui.alive_mode ? 'Alive Mode' : 'Core Mode'}</div>
-              <p className="text-[10px] text-[var(--text-muted)] mt-1 max-w-md">
+              <div className="text-lg font-semibold mb-1">{config.ui.alive_mode ? 'Alive Mode' : 'Core Mode'}</div>
+              <p className="text-xs text-[var(--text-muted)] max-w-md leading-relaxed">
                 {config.ui.alive_mode
-                  ? 'Reflection, idle thinking, knowledge extraction, goals, and notifications are active. Uses background tokens.'
+                  ? 'Reflection, knowledge extraction, goals, and notifications are active. Uses background tokens.'
                   : 'Proxy, memory, audit, and sandbox only. Zero background token usage.'}
               </p>
             </div>
@@ -84,10 +86,10 @@ export function Settings() {
                   console.error('Failed to save alive mode:', e);
                 }
               }}
-              className="px-3 py-1.5 rounded-md text-xs font-medium border transition"
+              className="px-4 py-2 rounded-lg text-sm font-medium border transition-all duration-200"
               style={config.ui.alive_mode
                 ? { borderColor: 'var(--accent)', color: 'var(--accent)', backgroundColor: 'var(--accent-subtle)' }
-                : { borderColor: 'var(--border)', color: 'var(--text-secondary)' }
+                : { borderColor: 'var(--border)', color: 'var(--text-secondary)', backgroundColor: 'var(--bg-tertiary)' }
               }
             >
               {config.ui.alive_mode ? 'Switch to Core' : 'Switch to Alive'}

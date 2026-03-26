@@ -18,7 +18,6 @@ export function Dashboard() {
   const [apiPort, setApiPort] = useState(9000);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Debounced refresh — batches rapid signals into a single fetch
   const debouncedRefresh = useCallback(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
@@ -27,7 +26,6 @@ export function Dashboard() {
     }, 500);
   }, [refreshAgents]);
 
-  // Load activity feed + server port, poll every 5s as fallback
   useEffect(() => {
     getActivityFeed(50).then(setActivity).catch(console.error);
     getServerInfo().then((info) => setApiPort(info.port)).catch(() => {});
@@ -38,7 +36,6 @@ export function Dashboard() {
     return () => clearInterval(interval);
   }, [refreshAgents]);
 
-  // Listen for real-time events
   useEffect(() => {
     const unlistenRefresh = onActivityRefresh(() => {
       debouncedRefresh();
@@ -53,7 +50,6 @@ export function Dashboard() {
     };
   }, [dispatch, debouncedRefresh]);
 
-  // Cmd/Ctrl+N to create new agent
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
@@ -73,32 +69,40 @@ export function Dashboard() {
     <div>
       {!state.dockerAvailable && (
         <div
-          className="mb-4 px-4 py-2.5 rounded-lg text-sm border"
-          style={{ backgroundColor: 'rgba(234, 179, 8, 0.08)', borderColor: 'rgba(234, 179, 8, 0.25)', color: '#eab308' }}
+          className="mb-5 px-4 py-3 rounded-xl text-sm border"
+          style={{ backgroundColor: 'rgba(234, 179, 8, 0.06)', borderColor: 'rgba(234, 179, 8, 0.2)', color: '#eab308' }}
         >
           Docker not detected. Tool execution is disabled.
         </div>
       )}
 
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-bold">Dashboard</h1>
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-2xl font-bold mb-1">Dashboard</h1>
+          <p className="text-xs text-[var(--text-muted)]">
+            {state.agents.length} agent{state.agents.length !== 1 ? 's' : ''} registered
+          </p>
+        </div>
         <button
           onClick={() => setShowCreate(true)}
-          className="px-4 py-2 rounded-lg text-black text-sm font-medium hover:brightness-110 transition"
+          className="px-5 py-2.5 rounded-lg text-black text-sm font-medium hover:brightness-110 transition"
           style={{ backgroundColor: 'var(--accent)' }}
           title="Ctrl+N"
         >
-          + New Agent
+          New Agent
         </button>
       </div>
 
       {state.agents.length === 0 ? (
-        <div className="mt-16">
-          <EmptyState message="No agents yet" subtitle="They won't build themselves... or will they?" />
-          <div className="text-center mt-6">
+        <div className="mt-12">
+          <EmptyState
+            message="No agents yet"
+            subtitle="Create your first agent to get started. They'll remember everything."
+          />
+          <div className="text-center mt-8">
             <button
               onClick={() => setShowCreate(true)}
-              className="px-6 py-2.5 rounded-lg text-black text-sm font-medium hover:brightness-110 transition"
+              className="px-8 py-3 rounded-lg text-black text-sm font-semibold hover:brightness-110 transition"
               style={{ backgroundColor: 'var(--accent)' }}
             >
               Create Your First Agent
@@ -107,18 +111,33 @@ export function Dashboard() {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-            <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {state.agents.map((agent) => (
-                <AgentCard key={agent.id} agent={agent} onClick={() => navigate(`/agent/${agent.id}`)} />
-              ))}
+          {/* Chat panel first — this is the main action */}
+          <ChatPanel agents={state.agents} apiPort={apiPort} hasApiKey={!!hasApiKey} />
+
+          {/* Agents + Activity below */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mt-6">
+            <div className="lg:col-span-2">
+              <h2 className="text-sm font-medium text-[var(--text-secondary)] mb-3">Agents</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {state.agents.map((agent) => (
+                  <AgentCard key={agent.id} agent={agent} onClick={() => navigate(`/agent/${agent.id}`)} />
+                ))}
+              </div>
             </div>
-            <div className="rounded-lg border p-4" style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border)' }}>
+            <div>
               <h2 className="text-sm font-medium text-[var(--text-secondary)] mb-3">Activity</h2>
-              <ActivityFeed entries={activity} agentNames={agentNames} />
+              <div
+                className="rounded-xl border p-4"
+                style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border)' }}
+              >
+                <ActivityFeed
+                  entries={activity}
+                  agentNames={agentNames}
+                  emptyMessage="Send a message to see activity here"
+                />
+              </div>
             </div>
           </div>
-          <ChatPanel agents={state.agents} apiPort={apiPort} hasApiKey={!!hasApiKey} />
         </>
       )}
 

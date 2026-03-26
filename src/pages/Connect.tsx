@@ -157,10 +157,29 @@ agent = Agent(
 
   return (
     <div className="max-w-3xl">
-      <h1 className="text-xl font-bold mb-2">Connect an Agent</h1>
-      <p className="text-sm text-[var(--text-secondary)] mb-6">
+      <h1 className="text-2xl font-bold mb-2">Connect an Agent</h1>
+      <p className="text-sm text-[var(--text-secondary)] mb-8">
         Point any agent framework at <span className="font-mono text-[var(--accent)]">localhost:{port}</span> and it instantly gets memory, safety, and an audit trail.
       </p>
+
+      {/* How it works */}
+      <div className="grid grid-cols-3 gap-4 mb-10">
+        {[
+          { step: '1', title: 'Open GreenCube', desc: 'The API starts automatically' },
+          { step: '2', title: 'Change one line', desc: 'Point your agent at localhost' },
+          { step: '3', title: 'Done', desc: 'Memory, sandbox, and audit trail' },
+        ].map((item) => (
+          <div
+            key={item.step}
+            className="p-4 rounded-xl border text-center"
+            style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border)' }}
+          >
+            <div className="text-2xl font-bold mb-2" style={{ color: 'var(--accent)' }}>{item.step}</div>
+            <div className="text-sm font-medium mb-1">{item.title}</div>
+            <div className="text-[10px] text-[var(--text-muted)]">{item.desc}</div>
+          </div>
+        ))}
+      </div>
 
       {/* Agent selector */}
       {state.agents.length > 0 && (
