@@ -47,13 +47,17 @@ export function Layout({ children }: LayoutProps) {
         {/* Logo */}
         <div className="p-4 flex items-center gap-2.5">
           <svg width="20" height="20" viewBox="0 0 512 512" className="logo-glow" style={{ borderRadius: '3px' }}>
-            <polygon points="65.7,160 256,50 256,270 65.7,380" fill="#22C55E"/>
-            <polygon points="65.7,160 256,270 446.3,160 256,50" fill="#F0F0F0"/>
-            <polygon points="256,50 446.3,160 446.3,380 256,270" fill="#EF4444"/>
-            <line x1="129" y1="197" x2="256" y2="123" stroke="#1a1a1a" strokeWidth="3" opacity="0.3"/>
-            <line x1="192" y1="233" x2="256" y2="197" stroke="#1a1a1a" strokeWidth="3" opacity="0.3"/>
-            <line x1="320" y1="123" x2="256" y2="197" stroke="#1a1a1a" strokeWidth="3" opacity="0.3"/>
-            <line x1="384" y1="160" x2="256" y2="233" stroke="#1a1a1a" strokeWidth="3" opacity="0.3"/>
+            {/* Green face (front-left) */}
+            <polygon points="56.34,198.5 256,83 256,313 56.34,428.5" fill="#22C55E"/>
+            {/* Red face (top) */}
+            <polygon points="56.34,198.5 256,313 455.66,198.5 256,83" fill="#EF4444"/>
+            {/* Blue face (right) */}
+            <polygon points="256,83 455.66,198.5 455.66,428.5 256,313" fill="#3B82F6"/>
+            {/* Grid lines - subtle */}
+            <line x1="123" y1="237" x2="256" y2="160" stroke="#111" strokeWidth="3" opacity="0.35"/>
+            <line x1="189" y1="275" x2="256" y2="236" stroke="#111" strokeWidth="3" opacity="0.35"/>
+            <line x1="323" y1="160" x2="256" y2="236" stroke="#111" strokeWidth="3" opacity="0.35"/>
+            <line x1="389" y1="198" x2="256" y2="275" stroke="#111" strokeWidth="3" opacity="0.35"/>
           </svg>
           <span className="text-lg font-bold text-[var(--text-primary)]">GreenCube</span>
         </div>
