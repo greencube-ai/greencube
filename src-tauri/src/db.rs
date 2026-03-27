@@ -66,6 +66,9 @@ fn run_migrations(conn: &Connection) -> anyhow::Result<()> {
     if version < 7 {
         migrate_v6_to_v7(conn)?;
     }
+    if version < 8 {
+        migrate_v7_to_v8(conn)?;
+    }
     Ok(())
 }
 
@@ -464,6 +467,45 @@ fn migrate_v6_to_v7(conn: &Connection) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// v7 → v8: Add all tools to existing agents
+fn migrate_v7_to_v8(conn: &Connection) -> anyhow::Result<()> {
+    use rusqlite::params;
+
+    let all_tools = serde_json::json!([
+        "shell", "read_file", "write_file", "http_get",
+        "update_context", "set_reminder", "send_message", "spawn_specialist"
+    ]).to_string();
+
+    // Get all agents and update their tools_allowed to include all tools
+    let mut stmt = conn.prepare("SELECT id, tools_allowed FROM agents")?;
+    let agents: Vec<(String, String)> = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?.collect::<Result<Vec<_>, _>>()?;
+
+    for (id, current_tools_json) in &agents {
+        let current: Vec<String> = serde_json::from_str(current_tools_json).unwrap_or_default();
+        let all: Vec<String> = serde_json::from_str(&all_tools).unwrap_or_default();
+
+        // Merge: keep existing + add missing
+        let mut merged = current.clone();
+        for tool in &all {
+            if !merged.contains(tool) {
+                merged.push(tool.clone());
+            }
+        }
+
+        let merged_json = serde_json::to_string(&merged).unwrap_or_default();
+        conn.execute(
+            "UPDATE agents SET tools_allowed = ?1 WHERE id = ?2",
+            params![merged_json, id],
+        )?;
+    }
+
+    set_version(conn, 8)?;
+    tracing::info!("Database migrated to v8: all agents now have all tools");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -513,10 +555,10 @@ mod tests {
     }
 
     #[test]
-    fn test_schema_version_is_7() {
+    fn test_schema_version_is_8() {
         let conn = init_memory_database().expect("init");
         let version = get_version(&conn).expect("version");
-        assert_eq!(version, 7);
+        assert_eq!(version, 8);
     }
 
     #[test]
@@ -532,7 +574,7 @@ mod tests {
         run_migrations(&conn).expect("first");
         // Running again should be a no-op (version is already 3)
         run_migrations(&conn).expect("second should not fail");
-        assert_eq!(get_version(&conn).expect("v"), 7);
+        assert_eq!(get_version(&conn).expect("v"), 8);
     }
 
     #[test]
