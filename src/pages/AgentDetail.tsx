@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getAgent, getEpisodes, getAuditLog, getKnowledge, getAgentContext, getAgentLineage } from '../lib/invoke';
+import { getAgent, getEpisodes, getAuditLog, getKnowledge, getAgentContext, getAgentLineage, debugSpawn } from '../lib/invoke';
 import type { AgentLineage } from '../lib/invoke';
 import { onActivityUpdate } from '../lib/events';
 import { StatusBadge } from '../components/StatusBadge';
@@ -158,6 +158,27 @@ export function AgentDetail() {
                 {tool}
               </span>
             ))}
+          </div>
+
+          {/* Debug: Test Spawn button — remove before real launch */}
+          <div className="mb-8">
+            <button
+              onClick={async () => {
+                const domain = prompt('Spawn specialist for which domain?', 'testing');
+                if (!domain) return;
+                try {
+                  const name = await debugSpawn(agent.id, domain);
+                  alert(`Spawned: ${name}`);
+                  window.location.reload();
+                } catch (e) {
+                  alert(`Spawn failed: ${e}`);
+                }
+              }}
+              className="px-3 py-1.5 rounded-lg text-xs border transition-colors hover:border-[var(--accent)]"
+              style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+            >
+              Test Spawn Specialist
+            </button>
           </div>
 
           {/* Scratchpad — what the agent is thinking about */}

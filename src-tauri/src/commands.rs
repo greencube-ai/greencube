@@ -168,6 +168,17 @@ pub async fn get_agent_lineage(agent_id: String, state: State<'_, Arc<AppState>>
     }))
 }
 
+// ─── Debug Commands ─────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn debug_spawn(agent_id: String, domain: String, state: State<'_, Arc<AppState>>) -> Result<String> {
+    // Debug: create a specialist without competence checks. Remove before real launch.
+    match crate::spawn::debug_force_spawn(&state, &agent_id, &domain).await {
+        Ok(name) => Ok(name),
+        Err(e) => Err(GreenCubeError::Internal(e.to_string())),
+    }
+}
+
 // ─── Rating Commands ─────────────────────────────────────────────────────────
 
 #[tauri::command]
