@@ -25,12 +25,17 @@ export function AgentDetail() {
 
   useEffect(() => {
     if (!id) return;
-    getAgent(id).then(setAgent).catch((e) => setError(String(e)));
-    getEpisodes(id).then(setEpisodes).catch(console.error);
-    getAuditLog(id).then(setAuditEntries).catch(console.error);
-    getKnowledge(id).then(setKnowledge).catch(console.error);
-    getAgentContext(id).then(setContext).catch(console.error);
-    getAgentLineage(id).then(setLineage).catch(console.error);
+    const fetchAll = () => {
+      getAgent(id).then(setAgent).catch((e) => setError(String(e)));
+      getEpisodes(id).then(setEpisodes).catch(console.error);
+      getAuditLog(id).then(setAuditEntries).catch(console.error);
+      getKnowledge(id).then(setKnowledge).catch(console.error);
+      getAgentContext(id).then(setContext).catch(console.error);
+      getAgentLineage(id).then(setLineage).catch(console.error);
+    };
+    fetchAll();
+    const interval = setInterval(fetchAll, 5000);
+    return () => clearInterval(interval);
   }, [id]);
 
   useEffect(() => {

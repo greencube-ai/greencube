@@ -245,6 +245,29 @@ pub async fn chat_completions(
         }
     }
 
+    // Add tool usage hint to system prompt when tools are available
+    let has_injected_tools = body.get("tools").and_then(|t| t.as_array()).map_or(false, |a| !a.is_empty());
+    if has_injected_tools {
+        // Collect tool names first (from the tools array)
+        let tool_names: Vec<String> = body["tools"].as_array()
+            .map(|arr| arr.iter()
+                .filter_map(|t| t["function"]["name"].as_str().map(|s| s.to_string()))
+                .collect())
+            .unwrap_or_default();
+
+        if let Some(messages) = body["messages"].as_array_mut() {
+            let hint = format!(
+                "\n\nYou have access to these tools: {}. When the user asks you to perform an action that matches a tool, you MUST call that tool. Do not describe what you would do — actually do it.",
+                tool_names.join(", ")
+            );
+            if let Some(system_msg) = messages.iter_mut().find(|m| m["role"] == "system") {
+                if let Some(content) = system_msg["content"].as_str() {
+                    system_msg["content"] = serde_json::Value::String(format!("{}{}", content, hint));
+                }
+            }
+        }
+    }
+
     // Look up agent's provider (or fall back to default)
     let provider = {
         let db = state.db.lock().await;

@@ -38,12 +38,11 @@ mod tool_memory;
 use config::config_dir;
 use state::AppState;
 use std::sync::Arc;
-use tauri::Manager; // Required for app.manage()
-use tokio::sync::{Mutex, RwLock}; // MUST be tokio::sync, NOT std::sync
+use tauri::Manager;
+use tokio::sync::{Mutex, RwLock};
 use tracing_subscriber::EnvFilter;
 
 fn main() {
-    // Initialize tracing — logs to stdout
     let log_dir = config_dir().join("logs");
     let _ = std::fs::create_dir_all(&log_dir);
 
@@ -88,44 +87,41 @@ fn main() {
                 }
             });
 
-            // Bind API server with port fallback (try configured port, then +1..+10)
-            let host = config.server.host.clone();
             let port = config.server.port;
-            let listener = tauri::async_runtime::block_on(async {
-                for p in port..=port + 10 {
-                    match tokio::net::TcpListener::bind(format!("{}:{}", host, p)).await {
-                        Ok(l) => return l,
-                        Err(_) => tracing::warn!("Port {} in use, trying next", p),
-                    }
-                }
-                panic!(
-                    "Failed to bind to any port in range {}-{}. Close other processes or change server.port in config.toml.",
-                    port,
-                    port + 10
-                );
-            });
-            let actual_port = listener.local_addr().expect("bound address").port();
-            tracing::info!("API server will listen on {}:{}", host, actual_port);
 
             // Create shared state
             let state = Arc::new(AppState {
                 db: Mutex::new(conn),
-                config: RwLock::new(config),
+                config: RwLock::new(config.clone()),
                 docker: RwLock::new(docker),
-                app_handle: Some(handle),
-                actual_port,
+                app_handle: Some(handle.clone()),
+                actual_port: port,
             });
 
-            // Store state in Tauri's managed state
             app.manage(state.clone());
 
-            // Spawn axum server with the already-bound listener
+            // Spawn axum server with port fallback
             let server_state = state.clone();
+            let host = config.server.host.clone();
+
             tauri::async_runtime::spawn(async move {
                 let router = api::create_router(server_state);
-                axum::serve(listener, router)
-                    .await
-                    .expect("API server crashed");
+                for p in port..=(port + 10) {
+                    let addr = format!("{}:{}", host, p);
+                    match tokio::net::TcpListener::bind(&addr).await {
+                        Ok(listener) => {
+                            tracing::info!("API server will listen on {}", addr);
+                            axum::serve(listener, router).await.expect("API server crashed");
+                            return;
+                        }
+                        Err(_) => {
+                            if p < port + 10 {
+                                tracing::warn!("Port {} taken, trying {}", p, p + 1);
+                            }
+                        }
+                    }
+                }
+                tracing::error!("Could not bind to any port {}-{}", port, port + 10);
             });
 
             // Clean up old queue tasks on startup
@@ -145,6 +141,46 @@ fn main() {
             tauri::async_runtime::spawn(async move {
                 task_queue::run_queue_processor(queue_state).await;
             });
+
+            // System tray with menu
+            let open_handle = handle.clone();
+            let quit_handle = handle.clone();
+
+            use tauri::menu::MenuBuilder;
+            let menu = MenuBuilder::new(app)
+                .text("open", "Open GreenCube")
+                .separator()
+                .text("quit", "Quit")
+                .build()?;
+
+            let _tray = tauri::tray::TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&menu)
+                .tooltip("GreenCube — API running")
+                .on_menu_event(move |_app, event| {
+                    match event.id().as_ref() {
+                        "open" => {
+                            if let Some(window) = open_handle.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                        "quit" => {
+                            quit_handle.exit(0);
+                        }
+                        _ => {}
+                    }
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let tauri::tray::TrayIconEvent::DoubleClick { .. } = event {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                })
+                .build(app)?;
 
             Ok(())
         })
@@ -184,47 +220,10 @@ fn main() {
             commands::delete_provider,
         ])
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
-                // Graceful shutdown: kill any running GreenCube sandbox containers
-                let state = window.state::<Arc<AppState>>();
-                tauri::async_runtime::block_on(async {
-                    let docker = state.docker.read().await;
-                    if let Some(ref docker) = *docker {
-                        use bollard::container::{
-                            KillContainerOptions, ListContainersOptions, RemoveContainerOptions,
-                        };
-                        use std::collections::HashMap;
-                        let mut filters = HashMap::new();
-                        filters.insert("name".to_string(), vec!["greencube-".to_string()]);
-                        let opts = ListContainersOptions {
-                            all: true,
-                            filters,
-                            ..Default::default()
-                        };
-                        if let Ok(containers) = docker.list_containers(Some(opts)).await {
-                            for c in containers {
-                                if let Some(id) = c.id {
-                                    tracing::info!("Cleaning up container: {}", id);
-                                    let _ = docker
-                                        .kill_container(
-                                            &id,
-                                            None::<KillContainerOptions<String>>,
-                                        )
-                                        .await;
-                                    let _ = docker
-                                        .remove_container(
-                                            &id,
-                                            Some(RemoveContainerOptions {
-                                                force: true,
-                                                ..Default::default()
-                                            }),
-                                        )
-                                        .await;
-                                }
-                            }
-                        }
-                    }
-                });
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // Minimize to tray instead of quitting — proxy stays alive
+                let _ = window.hide();
+                api.prevent_close();
             }
         })
         .run(tauri::generate_context!())

@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 # Tauri
-tauri = { version = "2", features = ["devtools"] }
+tauri = { version = "2", features = ["tray-icon", "devtools"] }
 tauri-plugin-shell = "2"
 
 # Async runtime (Tauri 2 uses tokio internally, we need it for axum)
