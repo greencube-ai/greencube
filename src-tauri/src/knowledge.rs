@@ -118,45 +118,55 @@ pub fn recall_relevant(
 }
 
 /// Parse a reflection response into knowledge entries.
-/// Lenient parser: lines not matching format are silently ignored.
+/// Finds [tag] ANYWHERE in the text, not just at line starts.
+/// The LLM often puts tags mid-sentence: "1. Key facts: [fact] The user..."
 /// Returns (knowledge_lines, context_update) tuple.
 pub fn parse_reflection_response(response: &str) -> (Vec<(String, String)>, Option<String>) {
     let mut knowledge = Vec::new();
     let mut context_update = None;
 
+    if response.trim() == "NONE" || response.trim().is_empty() {
+        return (knowledge, context_update);
+    }
+
+    let tags = ["[fact]", "[preference]", "[warning]", "[skill]", "[context]"];
+
     for line in response.lines() {
         let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed == "NONE" {
+        if trimmed.is_empty() {
             continue;
         }
 
-        if let Some(rest) = trimmed.strip_prefix("[fact]") {
-            let content = rest.trim();
-            if !content.is_empty() {
-                knowledge.push(("fact".to_string(), content.to_string()));
-            }
-        } else if let Some(rest) = trimmed.strip_prefix("[preference]") {
-            let content = rest.trim();
-            if !content.is_empty() {
-                knowledge.push(("preference".to_string(), content.to_string()));
-            }
-        } else if let Some(rest) = trimmed.strip_prefix("[warning]") {
-            let content = rest.trim();
-            if !content.is_empty() {
-                knowledge.push(("warning".to_string(), content.to_string()));
-            }
-        } else if let Some(rest) = trimmed.strip_prefix("[skill]") {
-            let content = rest.trim();
-            if !content.is_empty() {
-                knowledge.push(("skill".to_string(), content.to_string()));
-            }
-        } else if let Some(rest) = trimmed.strip_prefix("[context]") {
-            let content = rest.trim();
-            if !content.is_empty() {
-                context_update = Some(content.to_string());
+        // Find all tag positions in this line
+        let mut found: Vec<(usize, &str)> = Vec::new();
+        for tag in &tags {
+            let mut start = 0;
+            while let Some(pos) = trimmed[start..].find(tag) {
+                found.push((start + pos, tag));
+                start += pos + tag.len();
             }
         }
-        // Lines not matching any format are silently ignored (lenient parser)
+        found.sort_by_key(|(pos, _)| *pos);
+
+        // Extract content after each tag
+        for (i, (pos, tag)) in found.iter().enumerate() {
+            let content_start = pos + tag.len();
+            let content_end = if i + 1 < found.len() {
+                found[i + 1].0
+            } else {
+                trimmed.len()
+            };
+            let content = trimmed[content_start..content_end].trim();
+            if content.is_empty() {
+                continue;
+            }
+            let category = tag.trim_start_matches('[').trim_end_matches(']');
+            if category == "context" {
+                context_update = Some(content.to_string());
+            } else {
+                knowledge.push((category.to_string(), content.to_string()));
+            }
+        }
     }
 
     (knowledge, context_update)
@@ -252,5 +262,22 @@ NONE
         let (knowledge, context) = parse_reflection_response("totally random garbage\nmore garbage\n");
         assert!(knowledge.is_empty());
         assert!(context.is_none());
+    }
+
+    #[test]
+    fn test_parse_reflection_midline_tags() {
+        // This is the actual LLM output format that was broken
+        let response = r#"1. What key facts did you learn? [fact] The user is interested in prime-checking functions
+2. What should you remember? [preference] The user likes mathematical programming examples
+3. Were there mistakes? [warning] No significant issues encountered
+4. Update context: [context] User exploring math algorithms"#;
+        let (knowledge, context) = parse_reflection_response(response);
+        assert_eq!(knowledge.len(), 3, "Expected 3 knowledge entries, got {}: {:?}", knowledge.len(), knowledge);
+        assert_eq!(knowledge[0].0, "fact");
+        assert!(knowledge[0].1.contains("prime"), "fact should contain 'prime': {}", knowledge[0].1);
+        assert_eq!(knowledge[1].0, "preference");
+        assert_eq!(knowledge[2].0, "warning");
+        assert!(context.is_some());
+        assert!(context.unwrap().contains("math"), "context should contain 'math'");
     }
 }

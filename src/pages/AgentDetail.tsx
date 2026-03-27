@@ -125,39 +125,31 @@ export function AgentDetail() {
       {/* OVERVIEW — the athlete profile */}
       {activeTab === 'overview' && (
         <div>
-          {/* Vital signs */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
-            {[
-              { label: 'Tasks', value: agent.total_tasks, color: 'var(--text-primary)' },
-              { label: 'Success', value: `${successRate}%`, color: successRate >= 80 ? 'var(--accent)' : successRate >= 50 ? '#eab308' : 'var(--status-error)' },
-              { label: 'Knowledge', value: knowledge.length, color: knowledge.length > 0 ? 'var(--accent)' : 'var(--text-muted)' },
-              { label: 'Spend', value: `$${(agent.total_spend_cents / 100).toFixed(2)}`, color: 'var(--text-secondary)' },
-            ].map((stat) => (
-              <div
-                key={stat.label}
-                className="p-4 rounded-xl border"
-                style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border)' }}
-              >
-                <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-wide mb-2">{stat.label}</div>
-                <div className="text-2xl font-bold" style={{ color: stat.color }}>{stat.value}</div>
+          {/* Vital signs — just the two that matter */}
+          <div className="grid grid-cols-2 gap-4 mb-8 max-w-md">
+            <div className="p-4 rounded-xl border" style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border)' }}>
+              <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-wide mb-2">Tasks</div>
+              <div className="text-3xl font-bold">{agent.total_tasks}</div>
+            </div>
+            <div className="p-4 rounded-xl border" style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border)' }}>
+              <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-wide mb-2">Success Rate</div>
+              <div className="text-3xl font-bold" style={{ color: successRate >= 80 ? 'var(--accent)' : successRate >= 50 ? '#eab308' : 'var(--status-error)' }}>
+                {successRate}%
               </div>
-            ))}
+            </div>
           </div>
 
-          {/* Capabilities */}
-          <div className="mb-8">
-            <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-wide mb-3">Capabilities</div>
-            <div className="flex flex-wrap gap-2">
-              {agent.tools_allowed.map((tool) => (
-                <span
-                  key={tool}
-                  className="px-3 py-1.5 rounded-lg text-xs font-medium"
-                  style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }}
-                >
-                  {tool}
-                </span>
-              ))}
-            </div>
+          {/* Capabilities — small, unobtrusive */}
+          <div className="flex flex-wrap gap-1.5 mb-8">
+            {agent.tools_allowed.map((tool) => (
+              <span
+                key={tool}
+                className="px-2 py-0.5 rounded text-[10px]"
+                style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-muted)' }}
+              >
+                {tool}
+              </span>
+            ))}
           </div>
 
           {/* Scratchpad — what the agent is thinking about */}
@@ -173,7 +165,7 @@ export function AgentDetail() {
             </div>
           )}
 
-          {/* Last reflection */}
+          {/* Last reflection — show extracted insights as bullet points */}
           {lastReflection && (
             <div className="mb-8">
               <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-wide mb-3">Last Reflection</div>
@@ -181,9 +173,31 @@ export function AgentDetail() {
                 className="p-4 rounded-xl border-l-2"
                 style={{ backgroundColor: 'var(--bg-secondary)', borderColor: '#a855f7' }}
               >
-                <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
-                  {(lastReflection.raw_data || lastReflection.summary).slice(0, 500)}
-                </p>
+                <ul className="space-y-1.5">
+                  {(() => {
+                    const raw = lastReflection.raw_data || lastReflection.summary;
+                    const tags = ['[fact]', '[preference]', '[warning]', '[skill]', '[context]'];
+                    const insights: string[] = [];
+                    for (const line of raw.split('\n')) {
+                      for (const tag of tags) {
+                        const idx = line.indexOf(tag);
+                        if (idx !== -1) {
+                          const content = line.slice(idx + tag.length).trim();
+                          if (content) insights.push(content);
+                        }
+                      }
+                    }
+                    if (insights.length === 0) {
+                      return <li className="text-sm text-[var(--text-secondary)]">{lastReflection.summary}</li>;
+                    }
+                    return insights.map((insight, i) => (
+                      <li key={i} className="text-sm text-[var(--text-secondary)] flex gap-2">
+                        <span className="text-[var(--text-muted)] flex-shrink-0">-</span>
+                        <span>{insight}</span>
+                      </li>
+                    ));
+                  })()}
+                </ul>
                 <div className="text-[10px] text-[var(--text-muted)] mt-3">
                   {new Date(lastReflection.created_at).toLocaleString()}
                 </div>
