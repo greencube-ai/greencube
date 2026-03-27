@@ -4,19 +4,22 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GreenCube — your agent forgets everything. one line. now it remembers.</title>
-    <meta name="description" content="A local runtime where AI agents learn from experience. One line change gives your agent persistent memory.">
+    <meta name="description" content="A local runtime where AI agents learn from experience. One line change gives your agent persistent memory, sandboxed tools, and a full audit trail.">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
         :root {
             --bg: #09090b;
             --bg-card: #111113;
+            --bg-elevated: #18181b;
             --border: #1e1e22;
             --text: #e4e4e7;
             --text-dim: #a1a1aa;
             --text-muted: #71717a;
             --green: #22c55e;
-            --green-dim: rgba(34, 197, 94, 0.1);
+            --green-dim: rgba(34, 197, 94, 0.08);
+            --purple: #a855f7;
+            --red: #ef4444;
         }
 
         body {
@@ -27,68 +30,98 @@
             -webkit-font-smoothing: antialiased;
         }
 
-        .container {
-            max-width: 640px;
-            margin: 0 auto;
-            padding: 0 24px;
-        }
+        .container { max-width: 720px; margin: 0 auto; padding: 0 24px; }
+        .wide { max-width: 880px; }
 
         /* Header */
-        header {
-            padding: 80px 0 0;
-            text-align: center;
-        }
+        header { padding: 80px 0 0; text-align: center; }
 
         .logo {
             display: inline-flex;
             align-items: center;
             gap: 12px;
-            margin-bottom: 40px;
+            margin-bottom: 48px;
         }
-
-        .logo svg {
-            width: 32px;
-            height: 32px;
-        }
-
-        .logo span {
-            font-size: 20px;
-            font-weight: 700;
-            letter-spacing: -0.02em;
-        }
+        .logo svg { width: 32px; height: 32px; }
+        .logo span { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
 
         h1 {
-            font-size: 36px;
+            font-size: 40px;
             font-weight: 700;
-            line-height: 1.2;
+            line-height: 1.15;
             letter-spacing: -0.03em;
-            margin-bottom: 16px;
+            margin-bottom: 20px;
         }
-
-        h1 em {
-            font-style: normal;
-            color: var(--green);
-        }
+        h1 em { font-style: normal; color: var(--green); }
 
         .subtitle {
-            font-size: 16px;
+            font-size: 17px;
             color: var(--text-dim);
-            margin-bottom: 64px;
+            margin-bottom: 48px;
+            max-width: 480px;
+            margin-left: auto;
+            margin-right: auto;
         }
 
-        /* Command block */
-        .command-section {
-            margin-bottom: 64px;
+        .hero-cta {
+            display: inline-flex;
+            gap: 12px;
+            margin-bottom: 80px;
         }
 
-        .command-label {
-            font-size: 13px;
-            color: var(--text-muted);
+        .btn-primary {
+            display: inline-block;
+            background: var(--green);
+            color: #000;
+            font-size: 14px;
+            font-weight: 600;
+            padding: 12px 28px;
+            border-radius: 8px;
+            text-decoration: none;
+            transition: filter 0.15s;
+        }
+        .btn-primary:hover { filter: brightness(1.1); }
+
+        .btn-ghost {
+            display: inline-block;
+            border: 1px solid var(--border);
+            color: var(--text-dim);
+            font-size: 14px;
+            font-weight: 500;
+            padding: 12px 28px;
+            border-radius: 8px;
+            text-decoration: none;
+            transition: all 0.15s;
+        }
+        .btn-ghost:hover { border-color: var(--text-muted); color: var(--text); }
+
+        /* Section headers */
+        .section-label {
+            font-size: 12px;
+            color: var(--green);
             text-transform: uppercase;
-            letter-spacing: 0.05em;
+            letter-spacing: 0.08em;
+            font-weight: 600;
             margin-bottom: 12px;
         }
 
+        h2 {
+            font-size: 28px;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            margin-bottom: 12px;
+        }
+
+        .section-desc {
+            font-size: 15px;
+            color: var(--text-muted);
+            margin-bottom: 32px;
+            max-width: 520px;
+        }
+
+        section { margin-bottom: 96px; }
+
+        /* Command block */
         .command-block {
             background: var(--bg-card);
             border: 1px solid var(--border);
@@ -98,8 +131,8 @@
             align-items: center;
             justify-content: space-between;
             gap: 16px;
+            margin-bottom: 12px;
         }
-
         .command-block code {
             font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
             font-size: 15px;
@@ -107,7 +140,6 @@
             white-space: nowrap;
             overflow-x: auto;
         }
-
         .copy-btn {
             background: none;
             border: 1px solid var(--border);
@@ -119,101 +151,187 @@
             flex-shrink: 0;
             transition: all 0.15s;
         }
+        .copy-btn:hover { border-color: var(--green); color: var(--green); }
+        .command-note { font-size: 13px; color: var(--text-muted); }
 
-        .copy-btn:hover {
-            border-color: var(--green);
-            color: var(--green);
+        /* Before/After */
+        .compare {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
         }
-
-        /* Features */
-        .features {
-            margin-bottom: 64px;
+        .compare-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
         }
-
-        .feature {
-            padding: 20px 0;
-            border-bottom: 1px solid var(--border);
-        }
-
-        .feature:first-child {
-            border-top: 1px solid var(--border);
-        }
-
-        .feature-title {
-            font-size: 15px;
+        .compare-card.after { border-color: var(--green); }
+        .compare-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
             font-weight: 600;
-            margin-bottom: 4px;
+            margin-bottom: 16px;
         }
-
-        .feature-desc {
+        .compare-card.before .compare-label { color: var(--red); }
+        .compare-card.after .compare-label { color: var(--green); }
+        .compare-item {
             font-size: 14px;
-            color: var(--text-muted);
+            color: var(--text-dim);
+            padding: 6px 0;
         }
+        .compare-item.bad { color: var(--text-muted); text-decoration: line-through; text-decoration-color: var(--text-muted); }
 
-        /* Download */
-        .download {
-            text-align: center;
-            margin-bottom: 80px;
+        /* Features grid */
+        .features-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
         }
-
-        .download-btn {
-            display: inline-block;
-            background: var(--green);
-            color: #000;
+        .feature-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+        }
+        .feature-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 14px;
+            font-size: 16px;
+        }
+        .feature-card h3 {
             font-size: 15px;
             font-weight: 600;
-            padding: 14px 32px;
-            border-radius: 10px;
-            text-decoration: none;
-            transition: filter 0.15s;
+            margin-bottom: 6px;
         }
-
-        .download-btn:hover {
-            filter: brightness(1.1);
-        }
-
-        .download-sub {
-            margin-top: 12px;
+        .feature-card p {
             font-size: 13px;
             color: var(--text-muted);
+            line-height: 1.5;
         }
 
-        .download-sub a {
-            color: var(--text-dim);
-            text-decoration: none;
+        /* How it works */
+        .steps {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
         }
-
-        .download-sub a:hover {
+        .step {
+            display: flex;
+            gap: 20px;
+            padding: 24px 0;
+            border-bottom: 1px solid var(--border);
+        }
+        .step:first-child { border-top: 1px solid var(--border); }
+        .step-num {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            background: var(--green-dim);
             color: var(--green);
+            font-size: 14px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
         }
+        .step h3 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+        .step p { font-size: 13px; color: var(--text-muted); }
+
+        /* Alive mode */
+        .alive-card {
+            background: linear-gradient(135deg, rgba(34, 197, 94, 0.04), rgba(168, 85, 247, 0.04));
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 32px;
+        }
+        .alive-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            background: rgba(168, 85, 247, 0.1);
+            color: var(--purple);
+            margin-bottom: 16px;
+        }
+        .alive-card h3 {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .alive-card > p {
+            font-size: 14px;
+            color: var(--text-muted);
+            margin-bottom: 20px;
+        }
+        .alive-features {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        .alive-feat {
+            font-size: 13px;
+            color: var(--text-dim);
+            padding: 8px 12px;
+            background: rgba(255,255,255,0.02);
+            border-radius: 8px;
+        }
+        .alive-feat strong { color: var(--text); font-weight: 600; }
+
+        /* Stats bar */
+        .stats {
+            display: flex;
+            justify-content: center;
+            gap: 48px;
+            padding: 32px 0;
+            border-top: 1px solid var(--border);
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 96px;
+        }
+        .stat { text-align: center; }
+        .stat-num { font-size: 28px; font-weight: 700; color: var(--green); }
+        .stat-label { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+
+        /* Download */
+        .download { text-align: center; margin-bottom: 96px; }
+        .download h2 { margin-bottom: 8px; }
+        .download .section-desc { margin: 0 auto 32px; }
+        .download-sub { margin-top: 16px; font-size: 13px; color: var(--text-muted); }
+        .download-sub a { color: var(--text-dim); text-decoration: none; }
+        .download-sub a:hover { color: var(--green); }
 
         /* Footer */
         footer {
             text-align: center;
-            padding: 40px 0 80px;
+            padding: 48px 0 80px;
             border-top: 1px solid var(--border);
         }
-
-        footer p {
-            font-size: 13px;
-            color: var(--text-muted);
-        }
-
-        footer a {
-            color: var(--text-dim);
-            text-decoration: none;
-        }
-
-        footer a:hover {
-            color: var(--green);
-        }
+        footer p { font-size: 13px; color: var(--text-muted); line-height: 2; }
+        footer a { color: var(--text-dim); text-decoration: none; }
+        footer a:hover { color: var(--green); }
 
         /* Mobile */
-        @media (max-width: 480px) {
+        @media (max-width: 640px) {
             header { padding-top: 48px; }
             h1 { font-size: 28px; }
-            .command-block code { font-size: 12px; }
-            .command-block { padding: 16px; }
+            h2 { font-size: 22px; }
+            .compare { grid-template-columns: 1fr; }
+            .features-grid { grid-template-columns: 1fr; }
+            .alive-features { grid-template-columns: 1fr; }
+            .stats { gap: 24px; }
+            .stat-num { font-size: 22px; }
+            .hero-cta { flex-direction: column; }
+            .command-block code { font-size: 11px; }
         }
     </style>
 </head>
@@ -227,42 +345,185 @@
                 <span>GreenCube</span>
             </div>
             <h1>your agent forgets everything.<br><em>one line. now it remembers.</em></h1>
-            <p class="subtitle">a local runtime where AI agents learn from experience</p>
+            <p class="subtitle">GreenCube sits between your agent and its LLM. every task gets logged, every fact gets extracted, every mistake gets remembered. your agent gets smarter without changing your code.</p>
+            <div class="hero-cta">
+                <a href="https://github.com/greencube-ai/greencube/releases/latest" class="btn-primary">Download for Windows</a>
+                <a href="https://github.com/greencube-ai/greencube" class="btn-ghost">View on GitHub</a>
+            </div>
         </header>
+    </div>
 
-        <section class="command-section">
-            <div class="command-label">add this before running your agent</div>
+    <!-- The command -->
+    <div class="container">
+        <section>
+            <div class="section-label">one line change</div>
+            <h2>point your agent at localhost</h2>
+            <p class="section-desc">add this environment variable before running your agent. that's the entire integration.</p>
             <div class="command-block">
                 <code>export OPENAI_API_BASE=http://localhost:9000/v1</code>
                 <button class="copy-btn" onclick="copy(this)">copy</button>
             </div>
+            <p class="command-note">works with OpenClaw, LangChain, CrewAI, raw Python, curl. anything that speaks the OpenAI API.</p>
         </section>
+    </div>
 
-        <section class="features">
-            <div class="feature">
-                <div class="feature-title">learns from every task</div>
-                <div class="feature-desc">extracts facts, tracks what worked and what didn't, remembers across sessions</div>
-            </div>
-            <div class="feature">
-                <div class="feature-title">runs on your machine</div>
-                <div class="feature-desc">everything local. sqlite database. no cloud. no account. you own your data</div>
-            </div>
-            <div class="feature">
-                <div class="feature-title">works with everything</div>
-                <div class="feature-desc">openclaw, langchain, crewai, raw python, curl. anything openai-compatible</div>
+    <!-- Before / After -->
+    <div class="container">
+        <section>
+            <div class="section-label">the problem</div>
+            <h2>without greencube vs with greencube</h2>
+            <br>
+            <div class="compare">
+                <div class="compare-card before">
+                    <div class="compare-label">without</div>
+                    <div class="compare-item bad">agent forgets everything between sessions</div>
+                    <div class="compare-item bad">tool calls run directly on your machine</div>
+                    <div class="compare-item bad">no record of what happened or why</div>
+                    <div class="compare-item bad">same mistakes repeated every time</div>
+                    <div class="compare-item bad">no way to see if it's improving</div>
+                </div>
+                <div class="compare-card after">
+                    <div class="compare-label">with greencube</div>
+                    <div class="compare-item">persistent memory across sessions</div>
+                    <div class="compare-item">tool calls sandboxed in Docker</div>
+                    <div class="compare-item">full audit trail of every action</div>
+                    <div class="compare-item">learns from failures, doesn't repeat them</div>
+                    <div class="compare-item">knowledge extraction shows what it learned</div>
+                </div>
             </div>
         </section>
+    </div>
 
+    <!-- How it works -->
+    <div class="container">
+        <section>
+            <div class="section-label">how it works</div>
+            <h2>three steps to smarter agents</h2>
+            <br>
+            <div class="steps">
+                <div class="step">
+                    <div class="step-num">1</div>
+                    <div>
+                        <h3>open greencube</h3>
+                        <p>the API server starts automatically on localhost:9000. it stays running in your system tray.</p>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-num">2</div>
+                    <div>
+                        <h3>run your agent normally</h3>
+                        <p>GreenCube proxies every request to your LLM. it injects relevant memories, logs everything, and runs tool calls in Docker sandboxes.</p>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-num">3</div>
+                    <div>
+                        <h3>check back later</h3>
+                        <p>open the app to see what your agent learned. knowledge it extracted. tasks it completed. mistakes it won't make again.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Core features -->
+    <div class="container wide">
+        <section>
+            <div class="section-label">core features</div>
+            <h2>everything your agent needs</h2>
+            <p class="section-desc">zero extra tokens in core mode. these features work by intercepting and enriching the requests your agent already makes.</p>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon" style="background: var(--green-dim);">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                    </div>
+                    <h3>persistent memory</h3>
+                    <p>episodic memory stores every task. keyword search retrieves relevant context and injects it before the LLM sees your message.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon" style="background: rgba(59, 130, 246, 0.08);">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                    </div>
+                    <h3>docker sandbox</h3>
+                    <p>shell commands, file operations, and HTTP requests run inside isolated Docker containers. nothing touches your host machine.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon" style="background: rgba(234, 179, 8, 0.08);">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#eab308" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                    </div>
+                    <h3>audit trail</h3>
+                    <p>every action logged with timestamps, permissions, costs, and results. see exactly what your agent did and why.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon" style="background: rgba(168, 85, 247, 0.08);">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    </div>
+                    <h3>multi-provider</h3>
+                    <p>each agent can use a different LLM. OpenAI for complex tasks, Ollama for cheap ones. switch without changing code.</p>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Alive Mode -->
+    <div class="container">
+        <section>
+            <div class="alive-card">
+                <div class="alive-badge">opt-in</div>
+                <h3>alive mode</h3>
+                <p>when you're ready for more. agents that don't just execute tasks but learn from them. costs additional tokens.</p>
+                <div class="alive-features">
+                    <div class="alive-feat"><strong>reflection</strong> — reviews what it learned after each task</div>
+                    <div class="alive-feat"><strong>knowledge extraction</strong> — stores structured facts for future use</div>
+                    <div class="alive-feat"><strong>agent-to-agent</strong> — agents can message each other for help</div>
+                    <div class="alive-feat"><strong>spawn specialist</strong> — agents create children when struggling in a domain</div>
+                    <div class="alive-feat"><strong>idle thinking</strong> — processes knowledge gaps between tasks</div>
+                    <div class="alive-feat"><strong>competence tracking</strong> — knows its strengths and weaknesses</div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Stats -->
+    <div class="container">
+        <div class="stats">
+            <div class="stat">
+                <div class="stat-num">130</div>
+                <div class="stat-label">tests passing</div>
+            </div>
+            <div class="stat">
+                <div class="stat-num">36</div>
+                <div class="stat-label">rust modules</div>
+            </div>
+            <div class="stat">
+                <div class="stat-num">8</div>
+                <div class="stat-label">built-in tools</div>
+            </div>
+            <div class="stat">
+                <div class="stat-num">11</div>
+                <div class="stat-label">ethical commandments</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Download -->
+    <div class="container">
         <section class="download">
-            <a href="https://github.com/greencube-ai/greencube/releases/latest" class="download-btn">Download for Windows</a>
+            <h2>get started</h2>
+            <p class="section-desc">download greencube, open it, add one line to your agent config. that's it.</p>
+            <a href="https://github.com/greencube-ai/greencube/releases/latest" class="btn-primary">Download for Windows</a>
             <p class="download-sub">
                 mac + linux coming soon<br>
-                <a href="https://github.com/greencube-ai/greencube">view source on github</a>
+                <a href="https://github.com/greencube-ai/greencube">source code on github</a>
             </p>
         </section>
+    </div>
 
+    <!-- Footer -->
+    <div class="container">
         <footer>
-            <p>130 tests. rust + tauri. <a href="https://github.com/greencube-ai/greencube">github</a></p>
+            <p>built with rust, tauri, react, and sqlite</p>
+            <p>open source under MIT / <a href="https://github.com/greencube-ai/greencube">github</a></p>
         </footer>
     </div>
 
