@@ -78,9 +78,7 @@ export function OnboardingModal() {
           <div className="onboarding-step">
             <div className="flex items-center gap-3 mb-3">
               <svg width="28" height="28" viewBox="0 0 512 512">
-                <polygon points="256,56 48,176 48,416 256,296" fill="#22C55E"/>
-                <polygon points="256,56 464,176 464,416 256,296" fill="#16A34A"/>
-                <polygon points="48,176 256,296 464,176 256,56" fill="#4ADE80"/>
+                <rect x="64" y="64" width="384" height="384" rx="48" ry="48" fill="none" stroke="#22C55E" strokeWidth="40"/>
               </svg>
               <h1 className="text-2xl font-bold">Welcome to GreenCube</h1>
             </div>
