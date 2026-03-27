@@ -47,9 +47,9 @@ export function Layout({ children }: LayoutProps) {
         {/* Logo */}
         <div className="p-4 flex items-center gap-2.5">
           <svg width="20" height="20" viewBox="0 0 512 512" className="logo-glow">
-            <polygon points="256,80 56,196 56,432 256,316" fill="#22C55E"/>
-            <polygon points="256,80 456,196 456,432 256,316" fill="#1BA34E"/>
-            <polygon points="256,80 56,196 256,316 456,196" fill="#34D36E"/>
+            <polygon points="56.4,198.5 256,83 256,313 56.4,428.5" fill="#22C55E"/>
+            <polygon points="56.4,198.5 256,313 455.6,198.5 256,83" fill="#E8E8E8"/>
+            <polygon points="256,83 455.6,198.5 455.6,428.5 256,313" fill="#EF4444"/>
           </svg>
           <span className="text-lg font-bold text-[var(--text-primary)]">GreenCube</span>
         </div>
