@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GreenCube — your agent forgets everything. one line. now it remembers.</title>
+    <meta name="description" content="A local runtime where AI agents learn from experience. One line change gives your agent persistent memory.">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --bg: #09090b;
+            --bg-card: #111113;
+            --border: #1e1e22;
+            --text: #e4e4e7;
+            --text-dim: #a1a1aa;
+            --text-muted: #71717a;
+            --green: #22c55e;
+            --green-dim: rgba(34, 197, 94, 0.1);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .container {
+            max-width: 640px;
+            margin: 0 auto;
+            padding: 0 24px;
+        }
+
+        /* Header */
+        header {
+            padding: 80px 0 0;
+            text-align: center;
+        }
+
+        .logo {
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 40px;
+        }
+
+        .logo svg {
+            width: 32px;
+            height: 32px;
+        }
+
+        .logo span {
+            font-size: 20px;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+
+        h1 {
+            font-size: 36px;
+            font-weight: 700;
+            line-height: 1.2;
+            letter-spacing: -0.03em;
+            margin-bottom: 16px;
+        }
+
+        h1 em {
+            font-style: normal;
+            color: var(--green);
+        }
+
+        .subtitle {
+            font-size: 16px;
+            color: var(--text-dim);
+            margin-bottom: 64px;
+        }
+
+        /* Command block */
+        .command-section {
+            margin-bottom: 64px;
+        }
+
+        .command-label {
+            font-size: 13px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 12px;
+        }
+
+        .command-block {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+        }
+
+        .command-block code {
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 15px;
+            color: var(--green);
+            white-space: nowrap;
+            overflow-x: auto;
+        }
+
+        .copy-btn {
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: all 0.15s;
+        }
+
+        .copy-btn:hover {
+            border-color: var(--green);
+            color: var(--green);
+        }
+
+        /* Features */
+        .features {
+            margin-bottom: 64px;
+        }
+
+        .feature {
+            padding: 20px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .feature:first-child {
+            border-top: 1px solid var(--border);
+        }
+
+        .feature-title {
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .feature-desc {
+            font-size: 14px;
+            color: var(--text-muted);
+        }
+
+        /* Download */
+        .download {
+            text-align: center;
+            margin-bottom: 80px;
+        }
+
+        .download-btn {
+            display: inline-block;
+            background: var(--green);
+            color: #000;
+            font-size: 15px;
+            font-weight: 600;
+            padding: 14px 32px;
+            border-radius: 10px;
+            text-decoration: none;
+            transition: filter 0.15s;
+        }
+
+        .download-btn:hover {
+            filter: brightness(1.1);
+        }
+
+        .download-sub {
+            margin-top: 12px;
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        .download-sub a {
+            color: var(--text-dim);
+            text-decoration: none;
+        }
+
+        .download-sub a:hover {
+            color: var(--green);
+        }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            padding: 40px 0 80px;
+            border-top: 1px solid var(--border);
+        }
+
+        footer p {
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        footer a {
+            color: var(--text-dim);
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            color: var(--green);
+        }
+
+        /* Mobile */
+        @media (max-width: 480px) {
+            header { padding-top: 48px; }
+            h1 { font-size: 28px; }
+            .command-block code { font-size: 12px; }
+            .command-block { padding: 16px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <svg viewBox="0 0 512 512">
+                    <rect x="64" y="64" width="384" height="384" rx="48" ry="48" fill="none" stroke="#22C55E" stroke-width="40"/>
+                </svg>
+                <span>GreenCube</span>
+            </div>
+            <h1>your agent forgets everything.<br><em>one line. now it remembers.</em></h1>
+            <p class="subtitle">a local runtime where AI agents learn from experience</p>
+        </header>
+
+        <section class="command-section">
+            <div class="command-label">add this before running your agent</div>
+            <div class="command-block">
+                <code>export OPENAI_API_BASE=http://localhost:9000/v1</code>
+                <button class="copy-btn" onclick="copy(this)">copy</button>
+            </div>
+        </section>
+
+        <section class="features">
+            <div class="feature">
+                <div class="feature-title">learns from every task</div>
+                <div class="feature-desc">extracts facts, tracks what worked and what didn't, remembers across sessions</div>
+            </div>
+            <div class="feature">
+                <div class="feature-title">runs on your machine</div>
+                <div class="feature-desc">everything local. sqlite database. no cloud. no account. you own your data</div>
+            </div>
+            <div class="feature">
+                <div class="feature-title">works with everything</div>
+                <div class="feature-desc">openclaw, langchain, crewai, raw python, curl. anything openai-compatible</div>
+            </div>
+        </section>
+
+        <section class="download">
+            <a href="https://github.com/greencube-ai/greencube/releases/latest" class="download-btn">Download for Windows</a>
+            <p class="download-sub">
+                mac + linux coming soon<br>
+                <a href="https://github.com/greencube-ai/greencube">view source on github</a>
+            </p>
+        </section>
+
+        <footer>
+            <p>130 tests. rust + tauri. <a href="https://github.com/greencube-ai/greencube">github</a></p>
+        </footer>
+    </div>
+
+    <script>
+        function copy(btn) {
+            navigator.clipboard.writeText('export OPENAI_API_BASE=http://localhost:9000/v1');
+            btn.textContent = 'copied';
+            setTimeout(() => btn.textContent = 'copy', 2000);
+        }
+    </script>
+</body>
+</html>
