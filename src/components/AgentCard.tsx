@@ -4,6 +4,8 @@ import { StatusBadge } from './StatusBadge';
 interface AgentCardProps {
   agent: Agent;
   onClick: () => void;
+  parentName?: string;
+  childCount?: number;
 }
 
 function timeAgo(dateStr: string): string {
@@ -16,7 +18,7 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
-export function AgentCard({ agent, onClick }: AgentCardProps) {
+export function AgentCard({ agent, onClick, parentName, childCount }: AgentCardProps) {
   const successRate = agent.total_tasks > 0
     ? Math.round((agent.successful_tasks / agent.total_tasks) * 100)
     : 0;
@@ -39,11 +41,23 @@ export function AgentCard({ agent, onClick }: AgentCardProps) {
       }}
     >
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-base font-semibold">{agent.name}</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-base font-semibold">{agent.name}</h3>
+          {parentName && (
+            <span className="px-1.5 py-0.5 rounded text-[9px] font-medium" style={{ backgroundColor: 'rgba(168, 85, 247, 0.1)', color: '#a855f7' }}>
+              from {parentName}
+            </span>
+          )}
+          {childCount !== undefined && childCount > 0 && (
+            <span className="px-1.5 py-0.5 rounded text-[9px] font-medium" style={{ backgroundColor: 'var(--accent-subtle)', color: 'var(--accent)' }}>
+              {childCount} specialist{childCount > 1 ? 's' : ''}
+            </span>
+          )}
+        </div>
         <StatusBadge status={agent.status} />
       </div>
 
-      {/* Stats row */}
+      {/* Stats */}
       <div className="flex items-center gap-3 text-xs text-[var(--text-muted)] mb-3">
         <span>{agent.total_tasks} tasks</span>
         <span className="text-[var(--border)]">|</span>
@@ -54,9 +68,8 @@ export function AgentCard({ agent, onClick }: AgentCardProps) {
         <span>{agent.tools_allowed.length} tools</span>
       </div>
 
-      {/* Last active */}
       <div className="text-[10px] text-[var(--text-muted)]">
-        Last active: {timeAgo(agent.updated_at)}
+        {timeAgo(agent.updated_at)}
       </div>
 
       {/* Reputation bar */}

@@ -63,6 +63,15 @@ export async function getAgentContext(agentId: string): Promise<string> {
   return invoke<string>('get_agent_context', { agentId });
 }
 
+export interface AgentLineage {
+  parent: { id: string; name: string; domain: string } | null;
+  children: { id: string; name: string; domain: string; knowledge_transferred: number }[];
+}
+
+export async function getAgentLineage(agentId: string): Promise<AgentLineage> {
+  return invoke<AgentLineage>('get_agent_lineage', { agentId });
+}
+
 export async function setAgentContext(agentId: string, content: string): Promise<void> {
   return invoke<void>('set_agent_context', { agentId, content });
 }

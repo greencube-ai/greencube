@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import { getActivityFeed, getServerInfo } from '../lib/invoke';
+import { getActivityFeed, getServerInfo, getAgentLineage } from '../lib/invoke';
+import type { AgentLineage } from '../lib/invoke';
 import { onActivityRefresh, onAgentStatusChange } from '../lib/events';
 import { AgentCard } from '../components/AgentCard';
 import { ActivityFeed } from '../components/ActivityFeed';
@@ -15,6 +16,7 @@ export function Dashboard() {
   const [showCreate, setShowCreate] = useState(false);
   const [activity, setActivity] = useState<AuditEntry[]>([]);
   const [apiPort, setApiPort] = useState(9000);
+  const [lineageMap, setLineageMap] = useState<Record<string, AgentLineage>>({});
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const activityRef = useRef<string>('');
@@ -41,6 +43,20 @@ export function Dashboard() {
     }, 5000);
     return () => clearInterval(interval);
   }, [updateActivity]);
+
+  // Fetch lineage for all agents
+  useEffect(() => {
+    if (state.agents.length === 0) return;
+    Promise.all(
+      state.agents.map(a => getAgentLineage(a.id).then(l => [a.id, l] as const).catch(() => null))
+    ).then(results => {
+      const map: Record<string, AgentLineage> = {};
+      for (const r of results) {
+        if (r) map[r[0]] = r[1];
+      }
+      setLineageMap(map);
+    });
+  }, [state.agents]);
 
   useEffect(() => {
     const unlistenRefresh = onActivityRefresh(() => { debouncedRefresh(); });
@@ -123,9 +139,18 @@ export function Dashboard() {
           {/* Agent cards */}
           <div className="lg:col-span-2">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {state.agents.map((agent) => (
-                <AgentCard key={agent.id} agent={agent} onClick={() => navigate(`/agent/${agent.id}`)} />
-              ))}
+              {state.agents.map((agent) => {
+                const lineage = lineageMap[agent.id];
+                return (
+                  <AgentCard
+                    key={agent.id}
+                    agent={agent}
+                    onClick={() => navigate(`/agent/${agent.id}`)}
+                    parentName={lineage?.parent?.name}
+                    childCount={lineage?.children?.length}
+                  />
+                );
+              })}
             </div>
           </div>
 

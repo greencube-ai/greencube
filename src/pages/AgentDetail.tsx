@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getAgent, getEpisodes, getAuditLog, getKnowledge, getAgentContext } from '../lib/invoke';
+import { getAgent, getEpisodes, getAuditLog, getKnowledge, getAgentContext, getAgentLineage } from '../lib/invoke';
+import type { AgentLineage } from '../lib/invoke';
 import { onActivityUpdate } from '../lib/events';
 import { StatusBadge } from '../components/StatusBadge';
 import { MemoryViewer } from '../components/MemoryViewer';
@@ -18,6 +19,7 @@ export function AgentDetail() {
   const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
   const [knowledge, setKnowledge] = useState<KnowledgeEntry[]>([]);
   const [context, setContext] = useState('');
+  const [lineage, setLineage] = useState<AgentLineage | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [error, setError] = useState('');
 
@@ -28,6 +30,7 @@ export function AgentDetail() {
     getAuditLog(id).then(setAuditEntries).catch(console.error);
     getKnowledge(id).then(setKnowledge).catch(console.error);
     getAgentContext(id).then(setContext).catch(console.error);
+    getAgentLineage(id).then(setLineage).catch(console.error);
   }, [id]);
 
   useEffect(() => {
@@ -88,6 +91,11 @@ export function AgentDetail() {
             <h1 className="text-2xl font-bold">{agent.name}</h1>
             <StatusBadge status={agent.status} />
           </div>
+          {lineage?.parent && (
+            <p className="text-xs mb-1" style={{ color: '#a855f7' }}>
+              Spawned from {lineage.parent.name} to specialize in {lineage.parent.domain}
+            </p>
+          )}
           {agent.system_prompt && (
             <p className="text-sm text-[var(--text-muted)] max-w-lg leading-relaxed">
               {agent.system_prompt.slice(0, 150)}{agent.system_prompt.length > 150 ? '...' : ''}
@@ -218,6 +226,33 @@ export function AgentDetail() {
                 </button>
               </div>
               <KnowledgeList entries={knowledge.slice(0, 3)} />
+            </div>
+          )}
+
+          {/* Lineage — children (specialists) */}
+          {lineage && lineage.children.length > 0 && (
+            <div className="mb-8">
+              <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-wide mb-3">Specialists</div>
+              <div className="space-y-2">
+                {lineage.children.map((child) => (
+                  <div
+                    key={child.id}
+                    onClick={() => navigate(`/agent/${child.id}`)}
+                    className="p-3 rounded-xl border flex items-center justify-between cursor-pointer hover:border-[var(--accent)] transition-colors"
+                    style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border)' }}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">{child.name}</span>
+                      <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ backgroundColor: 'rgba(168, 85, 247, 0.1)', color: '#a855f7' }}>
+                        {child.domain}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-[var(--text-muted)]">
+                      {child.knowledge_transferred} facts inherited
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
