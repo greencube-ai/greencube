@@ -6,15 +6,21 @@ use crate::memory::Episode;
 use crate::providers::Provider;
 use crate::state::AppState;
 
-const REFLECTION_PROMPT: &str = r#"You just completed a task. Review what happened in the conversation above.
+const REFLECTION_PROMPT: &str = r#"Review the conversation above. Extract what you learned.
 
-Answer these questions briefly. Use EXACTLY the format shown:
-1. What key facts did you learn? (format: [fact] statement)
-2. What should you remember for next time? (format: [preference] statement)
-3. Were there any mistakes or dead ends? (format: [warning] statement)
-4. Update your working context if needed: (format: [context] new content for your scratchpad)
+You MUST format each learning as EXACTLY one of these tags on its own line:
+[fact] statement here
+[warning] statement here
+[preference] statement here
+[context] brief note for your scratchpad
 
-Only include lines that are genuinely useful. If nothing notable was learned, respond with just: NONE"#;
+Do NOT number the items. Do NOT add explanations. Just the tags, one per line.
+If nothing was learned, write only: NONE
+
+Example output:
+[fact] The user's API uses Bearer token authentication
+[preference] The user prefers concise responses
+[context] Working on payment integration, auth is done"#;
 
 /// Run self-reflection after a task completes. Spawns as a background task.
 pub fn spawn_reflection(
@@ -89,7 +95,7 @@ async fn run_reflection(
         return Ok(());
     }
 
-    // Parse the reflection response (lenient parser)
+    // Parse the reflection response
     let (knowledge_entries, context_update) = knowledge::parse_reflection_response(content);
 
     let db = state.db.lock().await;
