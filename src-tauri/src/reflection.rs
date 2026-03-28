@@ -142,6 +142,17 @@ async fn run_reflection(
     );
     let _ = crate::context::append_context(&db, agent_id, &reflection_summary);
 
+    // Update context cluster for this domain
+    if let Some(ref d) = domain {
+        let _ = crate::context_clusters::update_cluster(&db, agent_id, d);
+    }
+
+    // Charge curiosity drive if [curious] entries were extracted
+    let curious_count = knowledge_entries.iter().filter(|(c, _, _)| c == "curious").count();
+    if curious_count > 0 {
+        let _ = crate::drives::charge_drive(&db, agent_id, "curiosity", 0.3 * curious_count as f64);
+    }
+
     // Update competence + task patterns for this domain
     if let Some(ref d) = domain {
         let _ = crate::competence::update_competence(&db, agent_id, d, true, None);

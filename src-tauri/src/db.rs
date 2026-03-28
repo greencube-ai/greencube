@@ -550,8 +550,49 @@ fn migrate_v8_to_v9(conn: &Connection) -> anyhow::Result<()> {
         CREATE INDEX IF NOT EXISTS idx_curiosities_agent ON curiosities(agent_id, explored, priority DESC);
     "#)?;
 
+    // Drives table
+    conn.execute_batch(r#"
+        CREATE TABLE IF NOT EXISTS drives (
+            agent_id TEXT NOT NULL,
+            drive_name TEXT NOT NULL,
+            energy REAL NOT NULL DEFAULT 0.0,
+            threshold REAL NOT NULL DEFAULT 1.0,
+            last_discharged_at TEXT NOT NULL,
+            PRIMARY KEY (agent_id, drive_name),
+            FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+        );
+    "#)?;
+
+    // Context clusters table
+    conn.execute_batch(r#"
+        CREATE TABLE IF NOT EXISTS context_clusters (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            cluster_name TEXT NOT NULL,
+            keywords TEXT NOT NULL,
+            task_count INTEGER NOT NULL DEFAULT 1,
+            last_seen_at TEXT NOT NULL,
+            FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+        );
+    "#)?;
+
+    // Relationships table
+    conn.execute_batch(r#"
+        CREATE TABLE IF NOT EXISTS relationships (
+            agent_id TEXT NOT NULL,
+            user_identifier TEXT NOT NULL,
+            interactions INTEGER NOT NULL DEFAULT 0,
+            positive_signals INTEGER NOT NULL DEFAULT 0,
+            negative_signals INTEGER NOT NULL DEFAULT 0,
+            notes TEXT NOT NULL DEFAULT '',
+            last_interaction_at TEXT NOT NULL,
+            PRIMARY KEY (agent_id, user_identifier),
+            FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+        );
+    "#)?;
+
     set_version(conn, 9)?;
-    tracing::info!("Database migrated to v9: valence + task_patterns + forks + curiosities");
+    tracing::info!("Database migrated to v9: the cat release");
     Ok(())
 }
 

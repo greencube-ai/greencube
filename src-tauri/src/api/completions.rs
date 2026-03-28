@@ -282,9 +282,23 @@ pub async fn chat_completions(
     emit_status(&state, &agent.id, "active");
     emit_refresh(&state);
 
-    // 3a. INJECT COMMANDMENTS (always first, non-negotiable)
+    // 3a. INJECT COMMANDMENTS + MOOD (always first, non-negotiable)
     if let Some(messages) = body["messages"].as_array_mut() {
         crate::commandments::inject_commandments(messages);
+
+        // Inject mood-driven behavior
+        let mood = {
+            let db = state.db.lock().await;
+            crate::mood::get_mood(&db, &agent.id)
+        };
+        let mood_text = crate::mood::mood_prompt(&mood);
+        if !mood_text.is_empty() {
+            if let Some(sys) = messages.iter_mut().find(|m| m["role"] == "system") {
+                if let Some(c) = sys["content"].as_str() {
+                    sys["content"] = serde_json::Value::String(format!("{}{}", c, mood_text));
+                }
+            }
+        }
     }
 
     // 3b. INJECT LEARNED PREFERENCES
@@ -994,10 +1008,19 @@ async fn finish_task(
     emit_status(&state, agent_id, "idle");
     emit_refresh(&state);
 
-    // Record growth metrics (UPSERT today's snapshot)
+    // Record growth metrics + update drives + mood
     {
         let db = state.db.lock().await;
         let _ = crate::metrics::record_metric(&db, agent_id);
+
+        // Initialize and charge drives
+        let _ = crate::drives::ensure_drives(&db, agent_id);
+        let _ = crate::drives::charge_drive(&db, agent_id, "curiosity", 0.1);
+        let _ = crate::drives::charge_drive(&db, agent_id, "social", 0.05);
+        let _ = crate::drives::charge_drive(&db, agent_id, "verification", 0.2);
+
+        // Update mood
+        let _ = crate::mood::update_mood(&db, agent_id);
     }
 
     // Background features only run in Alive Mode
@@ -1065,6 +1088,32 @@ async fn finish_task(
                     state.clone(), agent_id.to_string(), provider.clone(),
                     msgs.to_vec(), task_id.to_string(), None,
                 );
+            }
+        }
+    }
+
+    // Check drives — if any exceed threshold, act immediately
+    if alive_mode {
+        let actions = {
+            let db = state.db.lock().await;
+            crate::drives::check_drives(&db, agent_id)
+        };
+        for action in actions {
+            match action {
+                crate::drives::DriveAction::ExploreCuriosity => {
+                    // Discharge and let the next idle cycle handle it (drive ensures it fires)
+                    let db = state.db.lock().await;
+                    let _ = crate::drives::discharge_drive(&db, agent_id, "curiosity");
+                }
+                crate::drives::DriveAction::ReachOutToAgent => {
+                    let db = state.db.lock().await;
+                    let _ = crate::drives::discharge_drive(&db, agent_id, "social");
+                }
+                crate::drives::DriveAction::ForceSelfVerify => {
+                    // Already fired self-verify above if alive_mode
+                    let db = state.db.lock().await;
+                    let _ = crate::drives::discharge_drive(&db, agent_id, "verification");
+                }
             }
         }
     }
