@@ -83,6 +83,16 @@ export interface DockerStatus {
   available: boolean;
 }
 
+export interface Notification {
+  id: string;
+  agent_id: string;
+  content: string;
+  notification_type: string;
+  read: boolean;
+  created_at: string;
+  source?: string;
+}
+
 export interface Provider {
   id: string;
   name: string;

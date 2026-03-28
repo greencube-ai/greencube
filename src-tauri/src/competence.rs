@@ -101,6 +101,20 @@ pub fn get_competence_map(conn: &Connection, agent_id: &str) -> anyhow::Result<V
     Ok(entries)
 }
 
+/// Get the most recently assessed domain for an agent.
+pub fn get_most_recent_domain(conn: &Connection, agent_id: &str) -> anyhow::Result<Option<String>> {
+    let result = conn.query_row(
+        "SELECT domain FROM competence_map WHERE agent_id = ?1 ORDER BY last_assessed DESC LIMIT 1",
+        params![agent_id],
+        |row| row.get::<_, String>(0),
+    );
+    match result {
+        Ok(domain) => Ok(Some(domain)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// Get domains where the agent has <50% confidence with 3+ tasks. These are honest limitations.
 /// Tied to commandment 2 (never lie) and commandment 9 (flag uncertainty).
 pub fn get_limitations(conn: &Connection, agent_id: &str) -> anyhow::Result<Vec<String>> {

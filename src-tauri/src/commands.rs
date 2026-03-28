@@ -185,7 +185,16 @@ pub async fn debug_spawn(agent_id: String, domain: String, state: State<'_, Arc<
 pub async fn rate_response(agent_id: String, task_id: String, rating: i32, state: State<'_, Arc<AppState>>) -> Result<()> {
     let db = state.db.lock().await;
     crate::ratings::rate_response(&db, &agent_id, &task_id, rating)
-        .map_err(|e| GreenCubeError::Internal(e.to_string()))
+        .map_err(|e| GreenCubeError::Internal(e.to_string()))?;
+
+    // Thumbs down → lower competence in the agent's most recent domain
+    if rating < 0 {
+        if let Ok(Some(domain)) = crate::competence::get_most_recent_domain(&db, &agent_id) {
+            let _ = crate::competence::update_competence(&db, &agent_id, &domain, false, None);
+            tracing::info!("Human thumbs-down: competence lowered for agent {} domain '{}'", agent_id, domain);
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]

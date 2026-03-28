@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Agent, Episode, AuditEntry, AppConfig, Provider, KnowledgeEntry } from './types';
+import type { Agent, Episode, AuditEntry, AppConfig, Provider, KnowledgeEntry, Notification } from './types';
 
 export async function getAgents(): Promise<Agent[]> {
   return invoke<Agent[]>('get_agents');
@@ -129,4 +129,21 @@ export async function updateProvider(
 
 export async function deleteProvider(id: string): Promise<void> {
   return invoke<void>('delete_provider', { id });
+}
+
+// Notifications
+export async function getUnreadCount(): Promise<number> {
+  return invoke<number>('get_unread_count');
+}
+
+export async function getNotifications(unreadOnly: boolean, limit: number = 20): Promise<Notification[]> {
+  return invoke<Notification[]>('get_notifications', { unreadOnly, limit });
+}
+
+export async function markNotificationRead(id: string): Promise<void> {
+  return invoke<void>('mark_notification_read', { id });
+}
+
+export async function dismissAllNotifications(): Promise<void> {
+  return invoke<void>('dismiss_all_notifications');
 }

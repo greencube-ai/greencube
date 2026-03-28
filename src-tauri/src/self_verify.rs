@@ -93,8 +93,15 @@ async fn run_verification(
 
         tracing::info!("Self-verification: agent {} rated task {} as BAD: {}", agent_id, task_id, reason);
 
-        // Update competence with failure
-        if let Some(d) = domain {
+        // Update competence with failure — use provided domain or look up most recent
+        let effective_domain = match domain {
+            Some(d) => Some(d.to_string()),
+            None => {
+                let db = state.db.lock().await;
+                competence::get_most_recent_domain(&db, agent_id).ok().flatten()
+            }
+        };
+        if let Some(ref d) = effective_domain {
             let db = state.db.lock().await;
             let _ = competence::update_competence(&db, agent_id, d, false, None);
             tracing::info!("Competence updated: agent {} domain '{}' (FAILURE from self-verify)", agent_id, d);
