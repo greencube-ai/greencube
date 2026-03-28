@@ -13,6 +13,7 @@ mod context_budget;
 mod db;
 mod errors;
 mod feedback;
+mod fork;
 mod goals;
 mod identity;
 mod idle_thinker;

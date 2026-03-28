@@ -102,7 +102,7 @@ impl Default for AppConfig {
             },
             ui: UiConfig {
                 onboarding_complete: false,
-                alive_mode: false, // Core Mode by default
+                alive_mode: true, // Alive Mode by default — the creature is the product
             },
             idle: IdleConfig::default(),
             cost: CostConfig::default(),

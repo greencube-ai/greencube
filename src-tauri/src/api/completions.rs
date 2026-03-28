@@ -1217,6 +1217,33 @@ async fn execute_tool_call(state: &AppState, agent_id: &str, tool_name: &str, ar
                 Err(e) => format!("Error sending message to {}: {}", to_name, e),
             }
         }
+        "fork_agent" => {
+            let reason = match arguments["reason"].as_str() {
+                Some(r) => r,
+                None => return "Error: fork_agent requires 'reason' argument".into(),
+            };
+            let branch_a = match arguments["branch_a"].as_str() {
+                Some(a) => a,
+                None => return "Error: fork_agent requires 'branch_a' argument".into(),
+            };
+            let branch_b = match arguments["branch_b"].as_str() {
+                Some(b) => b,
+                None => return "Error: fork_agent requires 'branch_b' argument".into(),
+            };
+            let alive = state.config.read().await.ui.alive_mode;
+            if !alive { return "fork_agent requires Alive Mode. Enable in Settings.".into(); }
+
+            // Get the original messages from the current conversation context
+            // We pass empty messages since the fork will use the branch descriptions as the task
+            let fork_messages = vec![
+                serde_json::json!({"role": "user", "content": reason}),
+            ];
+
+            match crate::fork::execute_fork(state, agent_id, reason, branch_a, branch_b, &fork_messages).await {
+                Ok(result) => result,
+                Err(e) => format!("Fork failed: {}", e),
+            }
+        }
         _ => format!("Error: unknown tool '{}'", tool_name),
     };
 
@@ -1351,6 +1378,15 @@ fn build_tool_definitions(tools_allowed: &[String]) -> Vec<serde_json::Value> {
             "type": "object",
             "properties": {"domain": {"type": "string", "description": "The domain to specialize in (e.g., 'css', 'python', 'database')"}},
             "required": ["domain"]
+        })),
+        ("fork_agent", "Split into two copies to try different approaches in parallel. Both run independently, then the best result wins.", serde_json::json!({
+            "type": "object",
+            "properties": {
+                "reason": {"type": "string", "description": "Why you're forking (what problem you're exploring)"},
+                "branch_a": {"type": "string", "description": "Description of approach A"},
+                "branch_b": {"type": "string", "description": "Description of approach B"}
+            },
+            "required": ["reason", "branch_a", "branch_b"]
         })),
     ];
 

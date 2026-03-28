@@ -476,7 +476,7 @@ fn migrate_v7_to_v8(conn: &Connection) -> anyhow::Result<()> {
 
     let all_tools = serde_json::json!([
         "shell", "read_file", "write_file", "http_get",
-        "update_context", "set_reminder", "send_message", "spawn_specialist"
+        "update_context", "set_reminder", "send_message", "spawn_specialist", "fork_agent"
     ]).to_string();
 
     // Get all agents and update their tools_allowed to include all tools
@@ -532,8 +532,11 @@ fn migrate_v8_to_v9(conn: &Connection) -> anyhow::Result<()> {
         CREATE INDEX IF NOT EXISTS idx_task_patterns_agent ON task_patterns(agent_id);
     "#)?;
 
+    // Agent forks table
+    crate::fork::create_forks_table(conn)?;
+
     set_version(conn, 9)?;
-    tracing::info!("Database migrated to v9: valence + task_patterns");
+    tracing::info!("Database migrated to v9: valence + task_patterns + forks");
     Ok(())
 }
 
