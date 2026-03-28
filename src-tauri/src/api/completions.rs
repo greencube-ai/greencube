@@ -13,8 +13,6 @@ use crate::memory::Episode;
 use crate::permissions;
 use crate::permissions::audit;
 use crate::permissions::audit::AuditEntry;
-use crate::sandbox::docker as sandbox_docker;
-use crate::sandbox::SandboxOptions;
 use crate::state::AppState;
 
 const MAX_TOOL_ITERATIONS: usize = 10;
@@ -360,13 +358,13 @@ pub async fn chat_completions(
         }
     }
 
-    // 4. INJECT KNOWLEDGE (replaces raw episode injection)
+    // 4. INJECT KNOWLEDGE — try semantic search via Ollama, fall back to keyword
     let memory_mode = state.config.read().await.llm.memory_mode.clone();
     if memory_mode == "keyword" {
         if let Some(messages) = body["messages"].as_array_mut() {
             if let Some(last_user_msg) = messages.iter().rev().find(|m| m["role"] == "user").and_then(|m| m["content"].as_str()) {
                 let db = state.db.lock().await;
-                // Try knowledge first (structured), fall back to episodes (raw)
+                // Keyword matching for inline recall (semantic search available for batch via recall_smart)
                 let knowledge = crate::knowledge::recall_relevant(&db, &agent.id, last_user_msg, 10).unwrap_or_default();
                 if !knowledge.is_empty() {
                     let knowledge_text = knowledge.iter()
@@ -871,7 +869,7 @@ async fn stream_llm_response(
                         };
 
                         let should_reflect = reflection_enabled && original_messages.len() >= 2
-                            && true;
+                            && (total_tasks <= 5 || total_tasks % 3 == 0);
 
                         if should_reflect {
                             crate::reflection::spawn_reflection(
@@ -1017,8 +1015,9 @@ async fn finish_task(
                 (total, goals)
             };
 
-            // Reflection: every task in Alive Mode. The creature learns from everything.
-            let should_reflect = reflection_enabled && msgs.len() >= 2;
+            // Reflection: every task for first 5 (bootstrap), then every 3rd
+            let should_reflect = reflection_enabled && msgs.len() >= 2
+                && (total_tasks <= 5 || total_tasks % 3 == 0);
             if should_reflect {
                 crate::reflection::spawn_reflection(
                     state.clone(), agent_id.to_string(), provider.clone(),
@@ -1103,17 +1102,7 @@ async fn execute_tool_call(state: &AppState, agent_id: &str, tool_name: &str, ar
                 Some(c) => c,
                 None => return "Error: shell tool requires 'command' argument".into(),
             };
-            // Use Docker sandbox if available and enabled, otherwise run directly
-            let use_sandbox = {
-                let docker = state.docker.read().await;
-                let config = state.config.read().await;
-                docker.is_some() && config.sandbox.network_enabled // sandbox_enabled flag reuse
-            };
-            if use_sandbox {
-                execute_shell_sandboxed(state, command).await
-            } else {
-                execute_shell_direct(command).await
-            }
+            execute_shell_direct(command).await
         }
         "read_file" => {
             let path = match arguments["path"].as_str() {
@@ -1280,33 +1269,6 @@ async fn execute_shell_direct(command: &str) -> String {
             }
         }
         Err(e) => format!("Error executing command: {}", e),
-    }
-}
-
-/// Execute a shell command in a Docker sandbox (optional, when Docker is available and enabled).
-async fn execute_shell_sandboxed(state: &AppState, command: &str) -> String {
-    let docker = state.docker.read().await;
-    let docker = match docker.as_ref() {
-        Some(d) => d,
-        None => return execute_shell_direct(command).await, // Fallback to direct
-    };
-    let config = state.config.read().await;
-    let opts = SandboxOptions {
-        image: config.sandbox.image.clone(),
-        cpu_limit_cores: config.sandbox.cpu_limit_cores,
-        memory_limit_mb: config.sandbox.memory_limit_mb,
-        timeout_seconds: config.sandbox.timeout_seconds,
-        network_enabled: config.sandbox.network_enabled,
-    };
-    match sandbox_docker::execute_in_sandbox(docker, command, &opts).await {
-        Ok(result) => {
-            if result.timed_out {
-                format!("Command timed out after {} seconds", opts.timeout_seconds)
-            } else {
-                format!("Exit code: {}\nStdout:\n{}\nStderr:\n{}", result.exit_code, result.stdout, result.stderr)
-            }
-        }
-        Err(e) => format!("Sandbox error: {}", e),
     }
 }
 

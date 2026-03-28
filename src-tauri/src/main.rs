@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![allow(dead_code, unused_imports, unused_variables, unused_mut)]
 
 mod agent_messages;
 mod api;
@@ -30,7 +31,6 @@ mod projects;
 mod providers;
 mod ratings;
 mod reflection;
-mod sandbox;
 mod self_verify;
 mod spawn;
 mod state;
@@ -83,32 +83,12 @@ fn main() {
                 tracing::info!("Synced API key from config to providers on startup");
             }
 
-            // Check Docker
-            let docker = tauri::async_runtime::block_on(async {
-                match bollard::Docker::connect_with_local_defaults() {
-                    Ok(d) => {
-                        if d.ping().await.is_ok() {
-                            tracing::info!("Docker is available");
-                            Some(d)
-                        } else {
-                            tracing::warn!("Docker is installed but not responding");
-                            None
-                        }
-                    }
-                    Err(_) => {
-                        tracing::warn!("Docker is not available");
-                        None
-                    }
-                }
-            });
-
             let port = config.server.port;
 
             // Create shared state
             let state = Arc::new(AppState {
                 db: Mutex::new(conn),
                 config: RwLock::new(config.clone()),
-                docker: RwLock::new(docker),
                 app_handle: Some(handle.clone()),
                 actual_port: port,
             });

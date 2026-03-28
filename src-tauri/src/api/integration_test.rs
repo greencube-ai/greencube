@@ -102,7 +102,6 @@ fn create_test_state(mock_llm_url: &str) -> Arc<crate::state::AppState> {
     Arc::new(crate::state::AppState {
         db: tokio::sync::Mutex::new(conn),
         config: tokio::sync::RwLock::new(config),
-        docker: tokio::sync::RwLock::new(None),
         app_handle: None,
         actual_port: 0,
     })
@@ -344,5 +343,5 @@ async fn test_health_endpoint() {
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["status"], "ok");
     assert_eq!(body["version"], "0.9.0");
-    assert_eq!(body["docker_available"], false); // No Docker in tests
+    // Docker removed — health only returns status + version
 }
