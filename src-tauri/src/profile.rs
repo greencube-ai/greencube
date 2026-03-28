@@ -40,22 +40,42 @@ async fn regenerate_profile(state: &AppState, agent_id: &str, provider: &Provide
             .join("\n")
     };
 
-    let prompt = format!(
-        r#"Based on this agent's history, generate a brief profile (3-5 sentences max, 500 characters max):
+    let has_existing_profile = !agent.dynamic_profile.is_empty();
+
+    let prompt = if has_existing_profile {
+        format!(
+            r#"Here is this agent's current profile:
+"{}"
+
+New data since last update:
+- Total tasks: {} (success rate: {}%)
+- Recent knowledge: {}
+- Current context: {}
+
+Update the profile. Keep what's still true. Remove what's outdated. Add new observations about strengths, weaknesses, or patterns. The profile should feel like it's growing, not resetting. Write in third person. Max 5 sentences."#,
+            agent.dynamic_profile,
+            agent.total_tasks, success_rate,
+            knowledge_list,
+            if context.is_empty() { "None set" } else { &context },
+        )
+    } else {
+        format!(
+            r#"Generate a brief profile for this agent (3-5 sentences, third person):
 
 Agent name: {}
 Total tasks: {}, Success rate: {}%
-Tools available: {}
-Current working context: {}
-Knowledge base:
+Tools: {}
+Context: {}
+Knowledge:
 {}
 
-Describe: what this agent is good at, typical work patterns, and any preferences learned. If limited data is available, generate a brief profile based on what's known. Be concise."#,
-        agent.name, agent.total_tasks, success_rate,
-        agent.tools_allowed.join(", "),
-        if context.is_empty() { "None set" } else { &context },
-        knowledge_list,
-    );
+Describe what it's good at, patterns in its work, and any preferences. Be concise."#,
+            agent.name, agent.total_tasks, success_rate,
+            agent.tools_allowed.join(", "),
+            if context.is_empty() { "None set" } else { &context },
+            knowledge_list,
+        )
+    };
 
     let client = reqwest::Client::new();
     let url = format!("{}/chat/completions", provider.api_base_url);

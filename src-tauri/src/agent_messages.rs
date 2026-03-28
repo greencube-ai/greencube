@@ -148,6 +148,26 @@ pub async fn send_message(
         let _ = registry::increment_task_counts(&db, from_agent_id, true, cost);
     }
 
+    // Create knowledge entries on both agents — they remember the conversation
+    {
+        let db = state.db.lock().await;
+        let topic: String = content.chars().take(60).collect();
+        let resp_preview: String = response_text.chars().take(80).collect();
+
+        // Sender remembers asking
+        let _ = crate::knowledge::insert_knowledge(
+            &db, from_agent_id,
+            &format!("Asked {} about '{}'. They said: '{}'", to_agent.name, topic, resp_preview),
+            "fact", None,
+        );
+        // Receiver remembers being asked
+        let _ = crate::knowledge::insert_knowledge(
+            &db, &to_agent.id,
+            &format!("{} asked me about '{}'", from_agent.name, topic),
+            "fact", None,
+        );
+    }
+
     // Emit activity
     if let Some(handle) = &state.app_handle {
         use tauri::Emitter;

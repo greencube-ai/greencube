@@ -1,53 +1,49 @@
 # GreenCube
 
-where AI agents learn.
+**where AI agents learn from experience**
 
-GreenCube is a desktop app that sits between your agent and its LLM. one line change gives your agent persistent memory, safe tool execution, and a full audit trail. agents get smarter over time without changing your code.
+your agent forgets everything between sessions. GreenCube fixes that.
+
+one env variable. your OpenClaw, LangChain, or CrewAI agent starts extracting knowledge from every task, tracking what it's good at, and reflecting on mistakes. when it keeps failing at something, it creates a specialist to handle it.
 
 ## quick start
 
-```bash
-export OPENAI_API_BASE=http://localhost:9000/v1
-```
-
-run your OpenClaw agent normally. done.
-
-works with any OpenAI-compatible tool: OpenClaw, LangChain, CrewAI, raw Python, curl.
+1. download greencube from [greencube.world](https://greencube.world)
+2. add one line before running your agent:
+   ```
+   export OPENAI_API_BASE=http://localhost:9000/v1
+   ```
+3. run your agent. greencube handles the rest.
 
 ## what your agent gets
 
-- **persistent memory** — remembers across sessions
-- **docker sandbox** — tool calls run in containers, never on your machine
-- **audit trail** — every action logged
-- **streaming** — SSE support for real-time responses
-- **multi-provider** — each agent can use a different LLM
-- **11 ethical commandments** — baked into the binary
+- **persistent memory** — facts extracted from every task, injected into future tasks
+- **competence tracking** — knows what it's good at (python 91%) and bad at (css 43%)
+- **self-verification** — rates its own output and admits when it's wrong
+- **docker sandbox** — tool calls run in containers, not on your machine
+- **audit trail** — every action logged with timestamps
 
-## alive mode
+## alive mode (opt-in)
 
-opt-in. zero extra tokens by default.
+turn it on in settings. your agent starts:
+- reflecting after tasks and extracting structured knowledge
+- thinking between tasks about knowledge gaps
+- sending you notifications when it notices something important
+- spawning specialist children when it's struggling in a domain
 
-when enabled, agents reflect after tasks, extract knowledge, track their own competence, communicate with other agents, and spawn specialists when they're struggling in a domain.
+## works with
+
+openclaw / langchain / crewai / anything openai compatible
 
 ## build from source
 
-```bash
+```
 git clone https://github.com/greencube-ai/greencube
 cd greencube
 npm install
 npm run tauri dev
 ```
 
-requires: Node 20+, Rust 1.77+, Docker (optional)
+requires: node 20+, rust 1.77+, docker (optional)
 
-## status
-
-v0.7.0 — 130 tests. 36 rust modules.
-
-built by [hector](https://github.com/greencube-ai) and claude code.
-
-[greencube.world](https://greencube.world)
-
-## license
-
-MIT
+[greencube.world](https://greencube.world) / [github](https://github.com/greencube-ai/greencube)

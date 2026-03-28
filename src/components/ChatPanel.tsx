@@ -1,11 +1,14 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import type { Agent } from '../lib/types';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
-  streaming?: boolean; // true while still receiving tokens
+  streaming?: boolean;
   error?: boolean;
+  taskId?: string;
+  rated?: number; // 1 or -1
 }
 
 interface ChatPanelProps {
@@ -136,9 +139,10 @@ export function ChatPanel({ agents, apiPort, hasApiKey }: ChatPanelProps) {
         const content = data.error
           ? `Error: ${data.error}`
           : data.choices?.[0]?.message?.content || 'No response received.';
+        const taskId = data.greencube_task_id;
         setMessages((prev) => {
           const copy = [...prev];
-          copy[assistantIdx] = { role: 'assistant', content, error: !!data.error };
+          copy[assistantIdx] = { role: 'assistant', content, error: !!data.error, taskId };
           return copy;
         });
       }
@@ -208,6 +212,46 @@ export function ChatPanel({ agents, apiPort, hasApiKey }: ChatPanelProps) {
                 <span className="inline-block w-1 h-3 ml-0.5 rounded-full animate-pulse" style={{ backgroundColor: 'var(--accent)' }} />
               )}
             </div>
+            {msg.role === 'assistant' && !msg.streaming && msg.taskId && !msg.error && (
+              <div className="flex gap-1 mt-1">
+                <button
+                  onClick={() => {
+                    invoke('rate_response', { agentId: selectedAgentId, taskId: msg.taskId, rating: 1 }).catch(console.error);
+                    setMessages(prev => {
+                      const copy = [...prev];
+                      copy[i] = { ...copy[i], rated: 1 };
+                      return copy;
+                    });
+                  }}
+                  disabled={msg.rated !== undefined}
+                  className="text-[10px] px-1.5 py-0.5 rounded transition-colors"
+                  style={{
+                    color: msg.rated === 1 ? 'var(--accent)' : 'var(--text-muted)',
+                    opacity: msg.rated !== undefined && msg.rated !== 1 ? 0.3 : 1,
+                  }}
+                >
+                  good
+                </button>
+                <button
+                  onClick={() => {
+                    invoke('rate_response', { agentId: selectedAgentId, taskId: msg.taskId, rating: -1 }).catch(console.error);
+                    setMessages(prev => {
+                      const copy = [...prev];
+                      copy[i] = { ...copy[i], rated: -1 };
+                      return copy;
+                    });
+                  }}
+                  disabled={msg.rated !== undefined}
+                  className="text-[10px] px-1.5 py-0.5 rounded transition-colors"
+                  style={{
+                    color: msg.rated === -1 ? 'var(--status-error)' : 'var(--text-muted)',
+                    opacity: msg.rated !== undefined && msg.rated !== -1 ? 0.3 : 1,
+                  }}
+                >
+                  bad
+                </button>
+              </div>
+            )}
           </div>
         ))}
       </div>

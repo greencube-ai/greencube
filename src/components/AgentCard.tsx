@@ -23,6 +23,10 @@ export function AgentCard({ agent, onClick, parentName, childCount }: AgentCardP
     ? Math.round((agent.successful_tasks / agent.total_tasks) * 100)
     : 0;
 
+  // Force idle if last update was more than 30s ago but status says active
+  const staleSecs = (Date.now() - new Date(agent.updated_at).getTime()) / 1000;
+  const displayStatus = (agent.status === 'active' && staleSecs > 30) ? 'idle' : agent.status;
+
   return (
     <div
       onClick={onClick}
@@ -54,18 +58,24 @@ export function AgentCard({ agent, onClick, parentName, childCount }: AgentCardP
             </span>
           )}
         </div>
-        <StatusBadge status={agent.status} />
+        <StatusBadge status={displayStatus} />
       </div>
 
       {/* Stats */}
       <div className="flex items-center gap-3 text-xs text-[var(--text-muted)] mb-3">
-        <span>{agent.total_tasks} tasks</span>
-        <span className="text-[var(--border)]">|</span>
-        <span style={{ color: successRate >= 80 ? 'var(--accent)' : successRate >= 50 ? '#eab308' : 'var(--status-error)' }}>
-          {successRate}%
-        </span>
-        <span className="text-[var(--border)]">|</span>
-        <span>{agent.tools_allowed.length} tools</span>
+        {agent.total_tasks === 0 ? (
+          <span>waiting for first task</span>
+        ) : (
+          <>
+            <span>{agent.total_tasks} tasks</span>
+            <span className="text-[var(--border)]">|</span>
+            <span style={{ color: successRate >= 80 ? 'var(--accent)' : successRate >= 50 ? '#eab308' : 'var(--status-error)' }}>
+              {successRate}%
+            </span>
+            <span className="text-[var(--border)]">|</span>
+            <span>{agent.tools_allowed.length} tools</span>
+          </>
+        )}
       </div>
 
       <div className="text-[10px] text-[var(--text-muted)]">

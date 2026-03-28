@@ -248,7 +248,6 @@ pub async fn chat_completions(
     // Add tool usage hint to system prompt when tools are available
     let has_injected_tools = body.get("tools").and_then(|t| t.as_array()).map_or(false, |a| !a.is_empty());
     if has_injected_tools {
-        // Collect tool names first (from the tools array)
         let tool_names: Vec<String> = body["tools"].as_array()
             .map(|arr| arr.iter()
                 .filter_map(|t| t["function"]["name"].as_str().map(|s| s.to_string()))
@@ -256,10 +255,22 @@ pub async fn chat_completions(
             .unwrap_or_default();
 
         if let Some(messages) = body["messages"].as_array_mut() {
-            let hint = format!(
+            let mut hint = format!(
                 "\n\nYou have access to these tools: {}. When the user asks you to perform an action that matches a tool, you MUST call that tool. Do not describe what you would do — actually do it.",
                 tool_names.join(", ")
             );
+
+            // Detect send_message intent — force tool usage
+            let last_user_msg = messages.iter().rev()
+                .find(|m| m["role"] == "user")
+                .and_then(|m| m["content"].as_str())
+                .unwrap_or("")
+                .to_lowercase();
+            let msg_patterns = ["send_message", "send a message", "ask ", "tell ", "message ", "talk to "];
+            if tool_names.contains(&"send_message".to_string()) && msg_patterns.iter().any(|p| last_user_msg.contains(p)) {
+                hint.push_str("\n\nIMPORTANT: The user is requesting communication with another agent. You MUST use the send_message tool. Do NOT answer the question yourself — delegate it to the other agent.");
+            }
+
             if let Some(system_msg) = messages.iter_mut().find(|m| m["role"] == "system") {
                 if let Some(content) = system_msg["content"].as_str() {
                     system_msg["content"] = serde_json::Value::String(format!("{}{}", content, hint));
