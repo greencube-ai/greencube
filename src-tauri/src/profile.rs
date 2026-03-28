@@ -19,12 +19,13 @@ pub fn maybe_regenerate(state: Arc<AppState>, agent_id: String, provider: Provid
 
 async fn regenerate_profile(state: &AppState, agent_id: &str, provider: &Provider) -> anyhow::Result<()> {
     // Gather agent data
-    let (agent, knowledge_entries, context) = {
+    let (agent, knowledge_entries, context, trajectory) = {
         let db = state.db.lock().await;
         let agent = registry::get_agent(&db, agent_id)?.ok_or_else(|| anyhow::anyhow!("agent not found"))?;
         let knowledge_entries = knowledge::list_knowledge(&db, agent_id, 10)?;
         let context = crate::context::get_context(&db, agent_id)?;
-        (agent, knowledge_entries, context)
+        let traj = crate::trajectory::build_trajectory_summary(&db, agent_id);
+        (agent, knowledge_entries, context, traj)
     };
 
     let success_rate = if agent.total_tasks > 0 {
@@ -51,12 +52,14 @@ New data since last update:
 - Total tasks: {} (success rate: {}%)
 - Recent knowledge: {}
 - Current context: {}
+- Growth trajectory: {}
 
-Update the profile. Keep what's still true. Remove what's outdated. Add new observations about strengths, weaknesses, or patterns. The profile should feel like it's growing, not resetting. Write in third person. Max 5 sentences."#,
+Update the profile. Keep what's still true. Remove what's outdated. Add new observations about strengths, weaknesses, or growth trends. The profile should feel like it's growing, not resetting. Write in third person. Max 5 sentences."#,
             agent.dynamic_profile,
             agent.total_tasks, success_rate,
             knowledge_list,
             if context.is_empty() { "None set" } else { &context },
+            trajectory,
         )
     } else {
         format!(

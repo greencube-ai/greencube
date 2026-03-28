@@ -9,6 +9,7 @@ mod competence;
 mod config;
 mod context;
 mod creature_status;
+mod curiosity;
 mod context_budget;
 mod db;
 mod errors;
@@ -36,6 +37,7 @@ mod state;
 mod task_patterns;
 mod task_queue;
 mod time_sense;
+mod trajectory;
 mod token_usage;
 mod tool_memory;
 

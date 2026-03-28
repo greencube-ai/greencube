@@ -76,11 +76,19 @@ pub async fn run_idle_thinker(state: Arc<AppState>) {
             };
             // DB lock released here!
 
-            // Get task patterns
-            let patterns_text = {
+            // Get task patterns, trajectory, and top curiosity
+            let (patterns_text, trajectory_text, curiosity_text) = {
                 let db = state.db.lock().await;
                 let patterns = crate::task_patterns::get_strong_patterns(&db, &agent.id).unwrap_or_default();
-                crate::task_patterns::format_patterns_for_prompt(&patterns)
+                let pat = crate::task_patterns::format_patterns_for_prompt(&patterns);
+                let traj = crate::trajectory::build_trajectory_summary(&db, &agent.id);
+                let curiosity = crate::curiosity::get_top_curiosity(&db, &agent.id).ok().flatten();
+                let cur = if let Some(ref c) = curiosity {
+                    format!("\nYour top curiosity (priority {}): {}\nThink about this if nothing else stands out.", c.priority, c.topic)
+                } else {
+                    String::new()
+                };
+                (pat, traj, cur)
             };
 
             // Build thinking prompt
@@ -175,8 +183,17 @@ One action only. Make it count."#,
                 notif_budget,
             );
 
-            // Append patterns if any
-            let prompt = if patterns_text.is_empty() { prompt } else { format!("{}\n{}", prompt, patterns_text) };
+            // Append trajectory, patterns, and top curiosity
+            let mut prompt = prompt;
+            if !trajectory_text.is_empty() {
+                prompt = format!("{}\n\nYour growth story:\n{}", prompt, trajectory_text);
+            }
+            if !patterns_text.is_empty() {
+                prompt = format!("{}\n{}", prompt, patterns_text);
+            }
+            if !curiosity_text.is_empty() {
+                prompt = format!("{}{}", prompt, curiosity_text);
+            }
 
             // Make LLM call (no DB lock held!)
             let client = reqwest::Client::new();

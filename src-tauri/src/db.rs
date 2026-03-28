@@ -535,8 +535,23 @@ fn migrate_v8_to_v9(conn: &Connection) -> anyhow::Result<()> {
     // Agent forks table
     crate::fork::create_forks_table(conn)?;
 
+    // Curiosities table
+    conn.execute_batch(r#"
+        CREATE TABLE IF NOT EXISTS curiosities (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            topic TEXT NOT NULL,
+            source_task_id TEXT,
+            priority INTEGER NOT NULL DEFAULT 1,
+            explored INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_curiosities_agent ON curiosities(agent_id, explored, priority DESC);
+    "#)?;
+
     set_version(conn, 9)?;
-    tracing::info!("Database migrated to v9: valence + task_patterns + forks");
+    tracing::info!("Database migrated to v9: valence + task_patterns + forks + curiosities");
     Ok(())
 }
 

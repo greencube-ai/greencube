@@ -294,7 +294,7 @@ pub fn parse_reflection_response(response: &str) -> (Vec<(String, String, i32)>,
     }
 
     // Match tags with optional valence: [fact], [fact valence=-1], [warning valence=2], etc.
-    let base_tags = ["fact", "preference", "warning", "skill", "context", "domain"];
+    let base_tags = ["fact", "preference", "warning", "skill", "curious", "context", "domain"];
 
     for line in response.lines() {
         let trimmed = line.trim();

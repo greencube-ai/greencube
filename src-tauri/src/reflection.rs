@@ -12,17 +12,20 @@ You MUST format each learning as EXACTLY one of these tags on its own line:
 [fact valence=N] statement here
 [warning valence=N] statement here
 [preference] statement here
+[curious] a question or topic you want to explore later (something interesting from this task)
 [domain] one-word category of this task (e.g., python, css, database, api, devops)
 [context] brief note for your scratchpad
 
 Valence is your emotional memory: -2=very frustrating, -1=difficult, 0=neutral, +1=went well, +2=excellent.
 Do NOT number the items. Just the tags, one per line.
 Always include exactly one [domain] tag.
+If something in this conversation made you curious, include a [curious] tag.
 If nothing was learned, write only: NONE
 
 Example output:
 [fact valence=1] The user's API uses Bearer token authentication
 [warning valence=-2] The /v2 endpoint returns 404 and was very frustrating to debug
+[curious] what happens when JWT tokens expire mid-request?
 [domain] api
 [context] Working on payment integration, auth is done"#;
 
@@ -117,9 +120,13 @@ async fn run_reflection(
 
     let db = state.db.lock().await;
 
-    // Store knowledge entries with valence
+    // Store knowledge entries with valence, route curiosities to curiosity queue
     for (category, entry_content, valence) in &knowledge_entries {
-        let _ = knowledge::insert_knowledge_with_valence(&db, agent_id, entry_content, category, Some(task_id), *valence);
+        if category == "curious" {
+            let _ = crate::curiosity::add_curiosity(&db, agent_id, entry_content, Some(task_id));
+        } else {
+            let _ = knowledge::insert_knowledge_with_valence(&db, agent_id, entry_content, category, Some(task_id), *valence);
+        }
     }
 
     // Update working context if provided
