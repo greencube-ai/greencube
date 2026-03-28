@@ -88,15 +88,6 @@ export function Dashboard() {
 
   return (
     <div>
-      {!state.dockerAvailable && (
-        <div
-          className="mb-5 px-4 py-3 rounded-xl text-sm border"
-          style={{ backgroundColor: 'rgba(234, 179, 8, 0.06)', borderColor: 'rgba(234, 179, 8, 0.2)', color: '#eab308' }}
-        >
-          Docker not detected. Tool execution is disabled.
-        </div>
-      )}
-
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>

@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useApp } from '../context/AppContext';
 import { getServerInfo, getUnreadCount, getNotifications, dismissAllNotifications, markNotificationRead } from '../lib/invoke';
 import { onToast } from '../lib/events';
 import { listen } from '@tauri-apps/api/event';
@@ -19,7 +18,6 @@ const navItems = [
 export function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { state } = useApp();
   const [port, setPort] = useState(9000);
   const [toast, setToast] = useState<{ type: string; message: string } | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -157,13 +155,8 @@ export function Layout({ children }: LayoutProps) {
         {/* Footer: status */}
         <div className="px-4 py-3 border-t space-y-1.5" style={{ borderColor: 'var(--border)' }}>
           <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
-            <div
-              className={`w-2 h-2 rounded-full ${state.dockerAvailable ? 'status-pulse' : ''}`}
-              style={{
-                backgroundColor: state.dockerAvailable ? 'var(--status-active)' : 'var(--status-error)',
-              }}
-            />
-            Docker {state.dockerAvailable ? 'Connected' : 'Unavailable'}
+            <div className="w-2 h-2 rounded-full status-pulse" style={{ backgroundColor: 'var(--status-active)' }} />
+            Running
           </div>
           <div className="text-[10px] text-[var(--text-muted)] font-mono">
             API: localhost:{port}

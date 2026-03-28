@@ -1095,14 +1095,27 @@ async fn execute_tool_call(state: &AppState, agent_id: &str, tool_name: &str, ar
                 Some(c) => c,
                 None => return "Error: shell tool requires 'command' argument".into(),
             };
-            execute_shell(state, command).await
+            // Use Docker sandbox if available and enabled, otherwise run directly
+            let use_sandbox = {
+                let docker = state.docker.read().await;
+                let config = state.config.read().await;
+                docker.is_some() && config.sandbox.network_enabled // sandbox_enabled flag reuse
+            };
+            if use_sandbox {
+                execute_shell_sandboxed(state, command).await
+            } else {
+                execute_shell_direct(command).await
+            }
         }
         "read_file" => {
             let path = match arguments["path"].as_str() {
                 Some(p) => p,
                 None => return "Error: read_file requires 'path' argument".into(),
             };
-            execute_shell(state, &format!("cat {}", sandbox_docker::shell_escape(path))).await
+            match tokio::fs::read_to_string(path).await {
+                Ok(content) => content,
+                Err(e) => format!("Error reading file: {}", e),
+            }
         }
         "write_file" => {
             let path = match arguments["path"].as_str() {
@@ -1113,19 +1126,29 @@ async fn execute_tool_call(state: &AppState, agent_id: &str, tool_name: &str, ar
                 Some(c) => c,
                 None => return "Error: write_file requires 'content' argument".into(),
             };
-            // SECURITY: Use base64 encoding to prevent here-doc injection.
-            // If content contained 'GREENCUBE_EOF', it would break out of the heredoc
-            // and execute arbitrary commands. Base64 eliminates this entirely.
-            use base64::Engine;
-            let encoded = base64::engine::general_purpose::STANDARD.encode(content.as_bytes());
-            execute_shell(state, &format!("echo {} | base64 -d > {}", encoded, sandbox_docker::shell_escape(path))).await
+            match tokio::fs::write(path, content).await {
+                Ok(()) => format!("File written: {}", path),
+                Err(e) => format!("Error writing file: {}", e),
+            }
         }
         "http_get" => {
             let url = match arguments["url"].as_str() {
                 Some(u) => u,
                 None => return "Error: http_get requires 'url' argument".into(),
             };
-            execute_shell(state, &format!("curl -sS {}", sandbox_docker::shell_escape(url))).await
+            match reqwest::Client::new().get(url).timeout(std::time::Duration::from_secs(15)).send().await {
+                Ok(resp) => {
+                    let status = resp.status();
+                    match resp.text().await {
+                        Ok(body) => {
+                            let truncated: String = body.chars().take(5000).collect();
+                            format!("HTTP {}\n{}", status, truncated)
+                        }
+                        Err(e) => format!("HTTP {} (body read error: {})", status, e),
+                    }
+                }
+                Err(e) => format!("Error: {}", e),
+            }
         }
         "update_context" => {
             let content = match arguments["content"].as_str() {
@@ -1198,11 +1221,39 @@ async fn execute_tool_call(state: &AppState, agent_id: &str, tool_name: &str, ar
     format!("{}{}", prefix, result)
 }
 
-async fn execute_shell(state: &AppState, command: &str) -> String {
+/// Execute a shell command directly on the host machine.
+async fn execute_shell_direct(command: &str) -> String {
+    use tokio::process::Command;
+
+    let shell = if cfg!(target_os = "windows") { "cmd" } else { "sh" };
+    let flag = if cfg!(target_os = "windows") { "/C" } else { "-c" };
+
+    match Command::new(shell)
+        .arg(flag)
+        .arg(command)
+        .output()
+        .await
+    {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let code = output.status.code().unwrap_or(-1);
+            if stderr.is_empty() {
+                format!("Exit code: {}\n{}", code, stdout)
+            } else {
+                format!("Exit code: {}\nStdout:\n{}\nStderr:\n{}", code, stdout, stderr)
+            }
+        }
+        Err(e) => format!("Error executing command: {}", e),
+    }
+}
+
+/// Execute a shell command in a Docker sandbox (optional, when Docker is available and enabled).
+async fn execute_shell_sandboxed(state: &AppState, command: &str) -> String {
     let docker = state.docker.read().await;
     let docker = match docker.as_ref() {
         Some(d) => d,
-        None => return "Error: Docker is not available. Install Docker to enable tool execution.".into(),
+        None => return execute_shell_direct(command).await, // Fallback to direct
     };
     let config = state.config.read().await;
     let opts = SandboxOptions {
