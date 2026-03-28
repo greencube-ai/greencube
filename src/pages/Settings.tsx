@@ -244,7 +244,7 @@ export function Settings() {
       <section className="mb-8">
         <h2 className="text-base font-medium mb-4 text-[var(--text-secondary)]">About</h2>
         <div className="text-sm text-[var(--text-muted)] space-y-1">
-          <div>Version: 0.7.0</div>
+          <div>Version: 0.9.0</div>
           <div className="flex items-center gap-2">
             Docker:{' '}
             <span style={{ color: dockerAvailable ? 'var(--status-active)' : 'var(--status-error)' }}>
