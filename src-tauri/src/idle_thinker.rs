@@ -202,7 +202,7 @@ One action only. Make it count."#,
                 .json(&serde_json::json!({
                     "model": provider.default_model,
                     "messages": [
-                        {"role": "system", "content": crate::commandments::AGENT_COMMANDMENTS},
+                        {"role": "system", "content": "You are an AI assistant."},
                         {"role": "user", "content": prompt}
                     ],
                     "max_tokens": 400,

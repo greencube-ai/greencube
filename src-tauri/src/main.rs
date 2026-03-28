@@ -4,7 +4,6 @@
 mod agent_messages;
 mod api;
 mod capabilities;
-mod commandments;
 mod commands;
 mod competence;
 mod config;

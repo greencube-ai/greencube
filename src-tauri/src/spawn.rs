@@ -2,7 +2,6 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
-use crate::commandments;
 use crate::competence;
 use crate::context;
 use crate::identity::registry;
@@ -189,7 +188,7 @@ Write ONLY the system prompt, nothing else."#,
         .json(&serde_json::json!({
             "model": provider.default_model,
             "messages": [
-                {"role": "system", "content": commandments::AGENT_COMMANDMENTS},
+                {"role": "system", "content": "You are an AI assistant."},
                 {"role": "user", "content": gen_prompt}
             ],
             "max_tokens": 200,

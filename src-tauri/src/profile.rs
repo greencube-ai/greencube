@@ -89,7 +89,7 @@ Describe what it's good at, patterns in its work, and any preferences. Be concis
         .json(&serde_json::json!({
             "model": provider.default_model,
             "messages": [
-                {"role": "system", "content": crate::commandments::AGENT_COMMANDMENTS},
+                {"role": "system", "content": "You are an AI assistant."},
                 {"role": "user", "content": prompt}
             ],
             "max_tokens": 200,

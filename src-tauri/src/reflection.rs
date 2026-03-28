@@ -61,8 +61,6 @@ async fn run_reflection(
         .cloned()
         .collect();
 
-    // Inject commandments at the start
-    crate::commandments::inject_commandments(&mut summary_messages);
 
     // Add the reflection prompt as the final user message
     summary_messages.push(serde_json::json!({

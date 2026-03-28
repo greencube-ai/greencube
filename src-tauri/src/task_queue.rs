@@ -116,7 +116,7 @@ pub fn queue_reminder(
     }
     let resume_at = (chrono::Utc::now() + chrono::Duration::minutes(minutes_from_now)).to_rfc3339();
     let messages = serde_json::json!([
-        {"role": "system", "content": crate::commandments::AGENT_COMMANDMENTS},
+        {"role": "system", "content": "You are an AI assistant."},
         {"role": "user", "content": prompt}
     ]);
     queue_task(conn, agent_id, &messages.to_string(), provider_id, &resume_at, "reminder", Some(prompt))

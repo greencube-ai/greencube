@@ -48,7 +48,7 @@ Rust backend + React/TypeScript frontend + SQLite + Docker sandboxing.
 - Spawn depth limited: children cannot spawn, global cap of 10 agents
 - Request body limit: 10MB
 - Spending caps enforced before LLM calls
-- Docker sandbox: network disabled by default, CPU/memory limits enforced
+- Tools execute directly on host (Docker removed)
 
 ## Known Limitations
 - Private keys stored unencrypted in SQLite (encrypt via keyring crate in future)

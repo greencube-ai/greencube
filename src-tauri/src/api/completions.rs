@@ -282,11 +282,8 @@ pub async fn chat_completions(
     emit_status(&state, &agent.id, "active");
     emit_refresh(&state);
 
-    // 3a. INJECT COMMANDMENTS + MOOD (always first, non-negotiable)
+    // Inject mood-driven behavior into system prompt
     if let Some(messages) = body["messages"].as_array_mut() {
-        crate::commandments::inject_commandments(messages);
-
-        // Inject mood-driven behavior
         let mood = {
             let db = state.db.lock().await;
             crate::mood::get_mood(&db, &agent.id)

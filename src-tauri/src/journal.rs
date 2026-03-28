@@ -3,7 +3,6 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
-use crate::commandments;
 use crate::memory::episodic;
 use crate::knowledge;
 use crate::goals;
@@ -166,7 +165,7 @@ Max 300 words."#,
         .json(&serde_json::json!({
             "model": provider.default_model,
             "messages": [
-                {"role": "system", "content": commandments::AGENT_COMMANDMENTS},
+                {"role": "system", "content": "You are an AI assistant."},
                 {"role": "user", "content": prompt}
             ],
             "max_tokens": 600,

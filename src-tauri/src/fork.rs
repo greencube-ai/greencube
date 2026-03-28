@@ -3,7 +3,6 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
-use crate::commandments;
 use crate::identity::registry;
 use crate::knowledge;
 use crate::providers;
@@ -85,7 +84,7 @@ pub async fn execute_fork(
     let mut messages_b = original_messages.to_vec();
 
     // Inject branch-specific system prompt
-    let base_system = format!("{}\n\n{}", commandments::AGENT_COMMANDMENTS, parent.system_prompt);
+    let base_system = parent.system_prompt.clone();
 
     if let Some(sys) = messages_a.iter_mut().find(|m| m["role"] == "system") {
         if let Some(c) = sys["content"].as_str() {
@@ -129,7 +128,7 @@ pub async fn execute_fork(
     );
 
     let judge_messages = vec![
-        serde_json::json!({"role": "system", "content": commandments::AGENT_COMMANDMENTS}),
+        serde_json::json!({"role": "system", "content": "You are an AI assistant."}),
         serde_json::json!({"role": "user", "content": judge_prompt}),
     ];
 

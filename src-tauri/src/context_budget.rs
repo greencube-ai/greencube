@@ -1,4 +1,4 @@
-/// Maximum tokens for all injected context combined (commandments excluded).
+/// Maximum tokens for all injected context combined (system prompt excluded).
 pub const MAX_INJECTION_TOKENS: usize = 2000;
 
 /// Rough token estimate. ~4 chars per token for English.
