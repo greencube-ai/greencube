@@ -72,6 +72,15 @@ fn main() {
             let db_path = data_dir.join("greencube.db");
             let conn = db::init_database(&db_path).expect("Failed to initialize database");
 
+            // Sync config API key to providers table on startup
+            if !config.llm.api_key.is_empty() {
+                let _ = conn.execute(
+                    "UPDATE providers SET api_key = ?1, api_base_url = ?2, default_model = ?3",
+                    rusqlite::params![config.llm.api_key, config.llm.api_base_url, config.llm.default_model],
+                );
+                tracing::info!("Synced API key from config to providers on startup");
+            }
+
             // Check Docker
             let docker = tauri::async_runtime::block_on(async {
                 match bollard::Docker::connect_with_local_defaults() {

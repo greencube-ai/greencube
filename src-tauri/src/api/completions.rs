@@ -1017,9 +1017,8 @@ async fn finish_task(
                 (total, goals)
             };
 
-            // Reflection: every task for first 10 (bootstrap), then every 3rd
-            let should_reflect = reflection_enabled && msgs.len() >= 2
-                && (total_tasks <= 10 || total_tasks % 3 == 0);
+            // Reflection: every task in Alive Mode. The creature learns from everything.
+            let should_reflect = reflection_enabled && msgs.len() >= 2;
             if should_reflect {
                 crate::reflection::spawn_reflection(
                     state.clone(), agent_id.to_string(), provider.clone(),
