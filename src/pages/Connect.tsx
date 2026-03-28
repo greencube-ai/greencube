@@ -10,7 +10,7 @@ export function Connect() {
   const [port, setPort] = useState(9000);
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [activeTab, setActiveTab] = useState<Tab>('python');
-  const [testResult, setTestResult] = useState<{ request: string; response: string } | null>(null);
+  const [testResult, setTestResult] = useState<{ request: string; response: string; success?: boolean } | null>(null);
   const [testing, setTesting] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -146,9 +146,14 @@ agent = Agent(
         body: JSON.stringify(requestBody),
       });
       const data = await resp.json();
-      setTestResult({ request: requestStr, response: JSON.stringify(data, null, 2) });
+      const isError = !!data.error;
+      setTestResult({
+        request: requestStr,
+        response: JSON.stringify(data, null, 2),
+        success: !isError,
+      });
     } catch (e) {
-      setTestResult({ request: requestStr, response: `Error: ${e}` });
+      setTestResult({ request: requestStr, response: `Error: ${e}`, success: false });
     } finally {
       setTesting(false);
     }
@@ -284,11 +289,16 @@ agent = Agent(
         {testing ? 'Testing...' : 'Test Connection'}
       </button>
 
-      {/* What just happened? */}
+      {/* Result */}
       {testResult && (
         <div className="rounded-lg border overflow-hidden" style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border)' }}>
-          <div className="px-4 py-2 border-b text-xs font-medium text-[var(--text-secondary)]" style={{ borderColor: 'var(--border)' }}>
-            What just happened?
+          <div className="px-4 py-2 border-b text-xs font-medium" style={{
+            borderColor: 'var(--border)',
+            color: testResult.success ? 'var(--accent)' : 'var(--status-error)',
+          }}>
+            {testResult.success
+              ? 'connection working. your agent is learning.'
+              : 'connection failed. make sure GreenCube is running and your API key is set in Settings.'}
           </div>
           <div className="grid grid-cols-2 divide-x" style={{ borderColor: 'var(--border)' }}>
             <div className="p-3">

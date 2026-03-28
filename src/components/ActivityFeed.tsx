@@ -15,6 +15,12 @@ const actionColors: Record<string, string> = {
   error: '#ef4444',
   task_start: '#22c55e',
   task_end: '#22c55e',
+  reflection: '#a855f7',
+  knowledge: '#06b6d4',
+  idle_thought: '#eab308',
+  spawn: '#f97316',
+  agent_created: '#22c55e',
+  communication: '#3b82f6',
 };
 
 export function ActivityFeed({ entries, agentNames, emptyMessage }: ActivityFeedProps) {
