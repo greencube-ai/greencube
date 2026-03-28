@@ -165,7 +165,7 @@ Max 3 thoughts per cycle."#,
             }
 
             // Parse thoughts and store (brief DB lock)
-            let notification_count_today = {
+            let mut notification_count_today = {
                 let db = state.db.lock().await;
                 notifications::count_idle_notifications_today(&db, &agent.id).unwrap_or(0)
             };
@@ -173,51 +173,53 @@ Max 3 thoughts per cycle."#,
             let mut spawn_request: Option<String> = None;
             {
                 let db = state.db.lock().await;
+                // Parse tags anywhere in line (not just at start — LLMs put tags mid-sentence)
+                let tag_names = ["[notify]", "[insight]", "[question]", "[gap]", "[connection]", "[spawn]"];
                 for line in content.lines() {
                     let trimmed = line.trim();
                     if trimmed.is_empty() || trimmed == "IDLE" { continue; }
 
-                    if let Some(text) = trimmed.strip_prefix("[notify]") {
-                        let text = text.trim();
-                        if !text.is_empty() {
-                            if notification_count_today < MAX_IDLE_NOTIFICATIONS_PER_DAY {
-                                // Create real notification
-                                let _ = notifications::create_notification(&db, &agent.id, text, "insight", "idle_thought");
-                                if let Some(handle) = &state.app_handle {
-                                    let _ = handle.emit("notification-new", serde_json::json!({"agent_id": &agent.id}));
+                    for tag in &tag_names {
+                        if let Some(idx) = trimmed.find(tag) {
+                            let text = trimmed[idx + tag.len()..].trim();
+                            if text.is_empty() { continue; }
+
+                            match *tag {
+                                "[notify]" => {
+                                    if notification_count_today < MAX_IDLE_NOTIFICATIONS_PER_DAY {
+                                        let _ = notifications::create_notification(&db, &agent.id, text, "insight", "idle_thought");
+                                        if let Some(handle) = &state.app_handle {
+                                            let _ = handle.emit("notification-new", serde_json::json!({"agent_id": &agent.id}));
+                                        }
+                                        notification_count_today += 1;
+                                    } else {
+                                        let _ = insert_thought(&db, &agent.id, text, "insight");
+                                    }
                                 }
-                            } else {
-                                // Store as regular insight instead (daily limit reached)
-                                let _ = insert_thought(&db, &agent.id, text, "insight");
+                                "[insight]" => {
+                                    let _ = insert_thought(&db, &agent.id, text, "insight");
+                                    let _ = knowledge::insert_knowledge(&db, &agent.id, text, "fact", None);
+                                }
+                                "[question]" => {
+                                    let _ = insert_thought(&db, &agent.id, text, "question");
+                                }
+                                "[gap]" => {
+                                    let _ = insert_thought(&db, &agent.id, text, "gap");
+                                }
+                                "[connection]" => {
+                                    let _ = insert_thought(&db, &agent.id, text, "connection");
+                                    let _ = knowledge::insert_knowledge(&db, &agent.id, text, "fact", None);
+                                }
+                                "[spawn]" => {
+                                    let domain = text.to_string();
+                                    if !domain.is_empty() && crate::spawn::can_spawn(&db, &agent.id) {
+                                        let _ = insert_thought(&db, &agent.id, &format!("Initiating spawn for domain: {}", domain), "spawn");
+                                        spawn_request = Some(domain);
+                                    }
+                                }
+                                _ => {}
                             }
-                        }
-                    } else if let Some(text) = trimmed.strip_prefix("[insight]") {
-                        let text = text.trim();
-                        if !text.is_empty() {
-                            let _ = insert_thought(&db, &agent.id, text, "insight");
-                            let _ = knowledge::insert_knowledge(&db, &agent.id, text, "fact", None);
-                        }
-                    } else if let Some(text) = trimmed.strip_prefix("[question]") {
-                        let text = text.trim();
-                        if !text.is_empty() {
-                            let _ = insert_thought(&db, &agent.id, text, "question");
-                        }
-                    } else if let Some(text) = trimmed.strip_prefix("[gap]") {
-                        let text = text.trim();
-                        if !text.is_empty() {
-                            let _ = insert_thought(&db, &agent.id, text, "gap");
-                        }
-                    } else if let Some(text) = trimmed.strip_prefix("[connection]") {
-                        let text = text.trim();
-                        if !text.is_empty() {
-                            let _ = insert_thought(&db, &agent.id, text, "connection");
-                            let _ = knowledge::insert_knowledge(&db, &agent.id, text, "fact", None);
-                        }
-                    } else if let Some(text) = trimmed.strip_prefix("[spawn]") {
-                        let domain = text.trim().to_string();
-                        if !domain.is_empty() && crate::spawn::can_spawn(&db, &agent.id) {
-                            let _ = insert_thought(&db, &agent.id, &format!("Initiating spawn for domain: {}", domain), "spawn");
-                            spawn_request = Some(domain);
+                            break; // Only process first tag per line
                         }
                     }
                 }

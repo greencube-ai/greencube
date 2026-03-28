@@ -12,14 +12,17 @@ You MUST format each learning as EXACTLY one of these tags on its own line:
 [fact] statement here
 [warning] statement here
 [preference] statement here
+[domain] one-word category of this task (e.g., python, css, database, api, devops)
 [context] brief note for your scratchpad
 
 Do NOT number the items. Do NOT add explanations. Just the tags, one per line.
+Always include exactly one [domain] tag.
 If nothing was learned, write only: NONE
 
 Example output:
 [fact] The user's API uses Bearer token authentication
-[preference] The user prefers concise responses
+[warning] The /v2 endpoint returns 404 for unauthenticated requests
+[domain] api
 [context] Working on payment integration, auth is done"#;
 
 /// Run self-reflection after a task completes. Spawns as a background task.
@@ -96,7 +99,7 @@ async fn run_reflection(
     }
 
     // Parse the reflection response
-    let (knowledge_entries, context_update) = knowledge::parse_reflection_response(content);
+    let (knowledge_entries, context_update, domain) = knowledge::parse_reflection_response(content);
 
     let db = state.db.lock().await;
 
@@ -108,6 +111,12 @@ async fn run_reflection(
     // Update working context if provided
     if let Some(ctx) = &context_update {
         let _ = crate::context::append_context(&db, agent_id, ctx);
+    }
+
+    // Update competence tracking for this domain
+    if let Some(ref d) = domain {
+        let _ = crate::competence::update_competence(&db, agent_id, d, true, None);
+        tracing::info!("Competence updated: agent {} domain '{}' (success)", agent_id, d);
     }
 
     // Log the reflection as an episode
