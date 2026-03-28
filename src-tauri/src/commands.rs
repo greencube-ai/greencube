@@ -141,10 +141,18 @@ pub async fn reset_app(state: State<'_, Arc<AppState>>) -> Result<()> {
              DELETE FROM response_ratings;
              DELETE FROM token_usage;
              DELETE FROM task_queue;
-             DELETE FROM goals;
-             DELETE FROM growth_metrics;
-             DELETE FROM capabilities;
+             DELETE FROM agent_goals;
+             DELETE FROM agent_metrics;
+             DELETE FROM agent_capabilities;
              DELETE FROM messages;
+             DELETE FROM idle_thoughts;
+             DELETE FROM journal_entries;
+             DELETE FROM task_patterns;
+             DELETE FROM agent_forks;
+             DELETE FROM curiosities;
+             DELETE FROM drives;
+             DELETE FROM context_clusters;
+             DELETE FROM relationships;
              DELETE FROM agents;
              DELETE FROM providers;
              DELETE FROM config_store;"
