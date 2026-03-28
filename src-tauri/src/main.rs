@@ -60,7 +60,7 @@ fn main() {
         .with_env_filter(EnvFilter::new("greencube=info,tower_http=info"))
         .init();
 
-    tracing::info!("Starting GreenCube v0.9.0");
+    tracing::info!("Starting GreenCube v1.0.0");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())

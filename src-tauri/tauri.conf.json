@@ -1,6 +1,6 @@
 {
   "productName": "GreenCube",
-  "version": "0.9.0",
+  "version": "1.0.0",
   "identifier": "com.greencube.app",
   "build": {
     "beforeDevCommand": "npm run dev",

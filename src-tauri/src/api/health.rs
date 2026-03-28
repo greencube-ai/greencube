@@ -7,6 +7,6 @@ use crate::state::AppState;
 pub async fn health_check(State(_state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "status": "ok",
-        "version": "0.9.0"
+        "version": "1.0.0"
     }))
 }

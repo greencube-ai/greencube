@@ -342,6 +342,6 @@ async fn test_health_endpoint() {
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["status"], "ok");
-    assert_eq!(body["version"], "0.9.0");
+    assert_eq!(body["version"], "1.0.0");
     // Docker removed — health only returns status + version
 }
