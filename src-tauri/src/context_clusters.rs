@@ -46,3 +46,29 @@ pub fn recall_cluster_knowledge(conn: &Connection, agent_id: &str, domain: &str,
             .unwrap_or_default()
     }).unwrap_or_default()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::init_memory_database;
+    use crate::identity::registry::create_agent;
+
+    #[test]
+    fn test_update_and_get_cluster() {
+        let conn = init_memory_database().expect("init");
+        let agent = create_agent(&conn, "Bot", "", &["shell".into()]).expect("create");
+        update_cluster(&conn, &agent.id, "python").expect("update");
+        assert_eq!(get_cluster_depth(&conn, &agent.id, "python"), 1);
+        update_cluster(&conn, &agent.id, "python").expect("update2");
+        assert_eq!(get_cluster_depth(&conn, &agent.id, "python"), 2);
+    }
+
+    #[test]
+    fn test_cluster_recall() {
+        let conn = init_memory_database().expect("init");
+        let agent = create_agent(&conn, "Bot", "", &["shell".into()]).expect("create");
+        crate::knowledge::insert_knowledge(&conn, &agent.id, "python async is fast", "fact", None).expect("k");
+        let results = recall_cluster_knowledge(&conn, &agent.id, "python", 10);
+        assert_eq!(results.len(), 1);
+    }
+}

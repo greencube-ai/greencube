@@ -107,3 +107,55 @@ pub fn get_drives(conn: &Connection, agent_id: &str) -> Vec<Drive> {
             .unwrap_or_default()
     }).unwrap_or_default()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::init_memory_database;
+    use crate::identity::registry::create_agent;
+
+    #[test]
+    fn test_ensure_drives_creates_three() {
+        let conn = init_memory_database().expect("init");
+        let agent = create_agent(&conn, "Bot", "", &["shell".into()]).expect("create");
+        ensure_drives(&conn, &agent.id).expect("ensure");
+        let drives = get_drives(&conn, &agent.id);
+        assert_eq!(drives.len(), 3);
+        assert!(drives.iter().any(|d| d.drive_name == "curiosity"));
+        assert!(drives.iter().any(|d| d.drive_name == "social"));
+        assert!(drives.iter().any(|d| d.drive_name == "verification"));
+    }
+
+    #[test]
+    fn test_charge_and_check_drives() {
+        let conn = init_memory_database().expect("init");
+        let agent = create_agent(&conn, "Bot", "", &["shell".into()]).expect("create");
+        ensure_drives(&conn, &agent.id).expect("ensure");
+        // Charge curiosity past threshold (0.5 * 3 = 1.5 > 1.0)
+        for _ in 0..3 { charge_drive(&conn, &agent.id, "curiosity", 0.5).expect("charge"); }
+        let actions = check_drives(&conn, &agent.id);
+        assert!(actions.iter().any(|a| matches!(a, DriveAction::ExploreCuriosity)));
+    }
+
+    #[test]
+    fn test_discharge_resets_energy() {
+        let conn = init_memory_database().expect("init");
+        let agent = create_agent(&conn, "Bot", "", &["shell".into()]).expect("create");
+        ensure_drives(&conn, &agent.id).expect("ensure");
+        charge_drive(&conn, &agent.id, "curiosity", 2.0).expect("charge");
+        discharge_drive(&conn, &agent.id, "curiosity").expect("discharge");
+        let drives = get_drives(&conn, &agent.id);
+        let curiosity = drives.iter().find(|d| d.drive_name == "curiosity").unwrap();
+        assert_eq!(curiosity.energy, 0.0);
+    }
+
+    #[test]
+    fn test_no_actions_below_threshold() {
+        let conn = init_memory_database().expect("init");
+        let agent = create_agent(&conn, "Bot", "", &["shell".into()]).expect("create");
+        ensure_drives(&conn, &agent.id).expect("ensure");
+        charge_drive(&conn, &agent.id, "curiosity", 0.5).expect("charge");
+        let actions = check_drives(&conn, &agent.id);
+        assert!(actions.is_empty());
+    }
+}

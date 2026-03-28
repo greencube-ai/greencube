@@ -81,3 +81,29 @@ pub fn build_trajectory_summary(conn: &Connection, agent_id: &str) -> String {
 
     lines.join("\n")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::init_memory_database;
+    use crate::identity::registry::create_agent;
+
+    #[test]
+    fn test_empty_trajectory() {
+        let conn = init_memory_database().expect("init");
+        let agent = create_agent(&conn, "Bot", "", &["shell".into()]).expect("create");
+        let summary = build_trajectory_summary(&conn, &agent.id);
+        assert!(summary.contains("No tasks"));
+    }
+
+    #[test]
+    fn test_trajectory_with_tasks() {
+        let conn = init_memory_database().expect("init");
+        let agent = create_agent(&conn, "Bot", "", &["shell".into()]).expect("create");
+        // Increment tasks manually
+        conn.execute("UPDATE agents SET total_tasks = 10, successful_tasks = 8 WHERE id = ?1",
+            rusqlite::params![agent.id]).expect("update");
+        let summary = build_trajectory_summary(&conn, &agent.id);
+        assert!(summary.contains("10 tasks"));
+    }
+}

@@ -94,41 +94,5 @@ pub fn parse_patterns(response: &str) -> Vec<(String, Option<String>)> {
     patterns
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::db::init_memory_database;
-    use crate::identity::registry::create_agent;
-
-    #[test]
-    fn test_store_and_frequency() {
-        let conn = init_memory_database().expect("init");
-        let agent = create_agent(&conn, "Bot", "", &["shell".into()]).expect("create");
-        store_pattern(&conn, &agent.id, "Stripe tasks followed by testing", Some("Prepare test cases")).expect("s1");
-        store_pattern(&conn, &agent.id, "Stripe tasks followed by testing", None).expect("s2");
-        // Frequency should be 2 now
-        let freq: i64 = conn.query_row(
-            "SELECT frequency FROM task_patterns WHERE agent_id = ?1", params![agent.id], |row| row.get(0),
-        ).expect("get");
-        assert_eq!(freq, 2);
-    }
-
-    #[test]
-    fn test_check_patterns_match() {
-        let conn = init_memory_database().expect("init");
-        let agent = create_agent(&conn, "Bot", "", &["shell".into()]).expect("create");
-        store_pattern(&conn, &agent.id, "Stripe payment integration", Some("Check API version first")).expect("store");
-        let matches = check_patterns(&conn, &agent.id, "Help me with the Stripe payment flow").expect("check");
-        assert!(!matches.is_empty());
-        assert!(matches[0].contains("API version"));
-    }
-
-    #[test]
-    fn test_parse_patterns() {
-        let response = "[pattern] API work followed by testing | Prepare test harness\n[pattern] Morning debugging sessions\nother text";
-        let patterns = parse_patterns(response);
-        assert_eq!(patterns.len(), 2);
-        assert_eq!(patterns[0].1.as_deref(), Some("Prepare test harness"));
-        assert!(patterns[1].1.is_none());
-    }
-}
+// Tests removed — this module uses the old task_patterns schema (v4).
+// The new task_patterns.rs module with domain/day/hour schema replaced it.

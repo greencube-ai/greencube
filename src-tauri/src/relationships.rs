@@ -75,3 +75,32 @@ pub fn get_relationship_prompt(conn: &Connection, agent_id: &str, user_id: &str)
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::init_memory_database;
+    use crate::identity::registry::create_agent;
+
+    #[test]
+    fn test_record_and_get_relationship() {
+        let conn = init_memory_database().expect("init");
+        let agent = create_agent(&conn, "Bot", "", &["shell".into()]).expect("create");
+        record_interaction(&conn, &agent.id, "user123").expect("r1");
+        record_interaction(&conn, &agent.id, "user123").expect("r2");
+        record_interaction(&conn, &agent.id, "user123").expect("r3");
+        record_signal(&conn, &agent.id, "user123", true).expect("pos");
+        let prompt = get_relationship_prompt(&conn, &agent.id, "user123");
+        assert!(prompt.is_some());
+        assert!(prompt.unwrap().contains("3 times"));
+    }
+
+    #[test]
+    fn test_no_prompt_for_strangers() {
+        let conn = init_memory_database().expect("init");
+        let agent = create_agent(&conn, "Bot", "", &["shell".into()]).expect("create");
+        record_interaction(&conn, &agent.id, "new_user").expect("r1");
+        let prompt = get_relationship_prompt(&conn, &agent.id, "new_user");
+        assert!(prompt.is_none()); // needs 3+ interactions
+    }
+}

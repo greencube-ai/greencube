@@ -50,3 +50,30 @@ pub fn format_patterns_for_prompt(patterns: &[(String, i32, i32, i64)]) -> Strin
     }).collect();
     format!("\nTask patterns you've noticed:\n{}", lines.join("\n"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::init_memory_database;
+    use crate::identity::registry::create_agent;
+
+    #[test]
+    fn test_record_and_get_patterns() {
+        let conn = init_memory_database().expect("init");
+        let agent = create_agent(&conn, "Bot", "", &["shell".into()]).expect("create");
+        for _ in 0..6 { record_task_timing(&conn, &agent.id, "python").expect("record"); }
+        let patterns = get_strong_patterns(&conn, &agent.id).expect("get");
+        assert_eq!(patterns.len(), 1);
+        assert_eq!(patterns[0].0, "python");
+        assert!(patterns[0].3 >= 5);
+    }
+
+    #[test]
+    fn test_no_patterns_below_threshold() {
+        let conn = init_memory_database().expect("init");
+        let agent = create_agent(&conn, "Bot", "", &["shell".into()]).expect("create");
+        record_task_timing(&conn, &agent.id, "css").expect("record");
+        let patterns = get_strong_patterns(&conn, &agent.id).expect("get");
+        assert!(patterns.is_empty());
+    }
+}

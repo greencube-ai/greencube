@@ -74,3 +74,40 @@ pub fn get_mood(conn: &Connection, agent_id: &str) -> String {
         |row| row.get(0),
     ).unwrap_or_else(|_| "neutral".to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::init_memory_database;
+    use crate::identity::registry::create_agent;
+    use crate::memory::{Episode, episodic};
+
+    #[test]
+    fn test_mood_neutral_no_tasks() {
+        let conn = init_memory_database().expect("init");
+        let agent = create_agent(&conn, "Bot", "", &["shell".into()]).expect("create");
+        assert_eq!(calculate_mood(&conn, &agent.id), "neutral");
+    }
+
+    #[test]
+    fn test_mood_thriving_after_successes() {
+        let conn = init_memory_database().expect("init");
+        let agent = create_agent(&conn, "Bot", "", &["shell".into()]).expect("create");
+        for i in 0..6 {
+            episodic::insert_episode(&conn, &Episode {
+                id: format!("ep{}", i), agent_id: agent.id.clone(),
+                created_at: chrono::Utc::now().to_rfc3339(), event_type: "task_end".into(),
+                summary: "done".into(), raw_data: None, task_id: None,
+                outcome: Some("success".into()), tokens_used: 0, cost_cents: 0,
+            }).expect("insert");
+        }
+        assert_eq!(calculate_mood(&conn, &agent.id), "thriving");
+    }
+
+    #[test]
+    fn test_mood_prompt_varies() {
+        assert!(!mood_prompt("thriving").is_empty());
+        assert!(!mood_prompt("struggling").is_empty());
+        assert!(mood_prompt("neutral").is_empty());
+    }
+}

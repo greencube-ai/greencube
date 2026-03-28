@@ -95,3 +95,41 @@ pub fn list_curiosities(conn: &Connection, agent_id: &str) -> anyhow::Result<Vec
     })?.collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::init_memory_database;
+    use crate::identity::registry::create_agent;
+
+    #[test]
+    fn test_add_and_get_curiosity() {
+        let conn = init_memory_database().expect("init");
+        let agent = create_agent(&conn, "Bot", "", &["shell".into()]).expect("create");
+        add_curiosity(&conn, &agent.id, "how does async work in Rust?", None).expect("add");
+        let top = get_top_curiosity(&conn, &agent.id).expect("get");
+        assert!(top.is_some());
+        assert!(top.unwrap().topic.contains("async"));
+    }
+
+    #[test]
+    fn test_priority_bumps_on_duplicate() {
+        let conn = init_memory_database().expect("init");
+        let agent = create_agent(&conn, "Bot", "", &["shell".into()]).expect("create");
+        add_curiosity(&conn, &agent.id, "how does async work?", None).expect("add1");
+        add_curiosity(&conn, &agent.id, "how does async work?", None).expect("add2");
+        let top = get_top_curiosity(&conn, &agent.id).expect("get").unwrap();
+        assert_eq!(top.priority, 2);
+    }
+
+    #[test]
+    fn test_mark_explored() {
+        let conn = init_memory_database().expect("init");
+        let agent = create_agent(&conn, "Bot", "", &["shell".into()]).expect("create");
+        add_curiosity(&conn, &agent.id, "test topic", None).expect("add");
+        let c = get_top_curiosity(&conn, &agent.id).expect("get").unwrap();
+        mark_explored(&conn, &c.id).expect("mark");
+        let top = get_top_curiosity(&conn, &agent.id).expect("get");
+        assert!(top.is_none()); // explored ones don't show as top
+    }
+}

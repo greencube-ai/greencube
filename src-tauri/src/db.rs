@@ -517,9 +517,10 @@ fn migrate_v8_to_v9(conn: &Connection) -> anyhow::Result<()> {
         conn.execute_batch("ALTER TABLE knowledge ADD COLUMN valence INTEGER DEFAULT 0;")?;
     }
 
-    // Task timing patterns table
+    // Task timing patterns table — drop old v4 schema and recreate with correct columns
     conn.execute_batch(r#"
-        CREATE TABLE IF NOT EXISTS task_patterns (
+        DROP TABLE IF EXISTS task_patterns;
+        CREATE TABLE task_patterns (
             id TEXT PRIMARY KEY,
             agent_id TEXT NOT NULL,
             domain TEXT NOT NULL,
