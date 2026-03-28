@@ -8,6 +8,7 @@ mod commands;
 mod competence;
 mod config;
 mod context;
+mod creature_status;
 mod context_budget;
 mod db;
 mod errors;
@@ -200,6 +201,7 @@ fn main() {
             commands::get_agent_lineage,
             commands::debug_spawn,
             commands::get_competence_map,
+            commands::get_creature_status,
             commands::rate_response,
             commands::get_approval_rate,
             commands::get_token_usage_today,

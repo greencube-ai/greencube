@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getAgent, getEpisodes, getAuditLog, getKnowledge, getAgentContext, getAgentLineage, getCompetenceMap } from '../lib/invoke';
+import { getAgent, getEpisodes, getAuditLog, getKnowledge, getAgentContext, getAgentLineage, getCompetenceMap, getCreatureStatus } from '../lib/invoke';
 import type { AgentLineage } from '../lib/invoke';
-import type { CompetenceEntry } from '../lib/types';
+import type { CompetenceEntry, CreatureStatus } from '../lib/types';
 import { onActivityUpdate } from '../lib/events';
 import { StatusBadge } from '../components/StatusBadge';
 import { MemoryViewer } from '../components/MemoryViewer';
@@ -22,6 +22,7 @@ export function AgentDetail() {
   const [context, setContext] = useState('');
   const [lineage, setLineage] = useState<AgentLineage | null>(null);
   const [competence, setCompetence] = useState<CompetenceEntry[]>([]);
+  const [creatureStatus, setCreatureStatus] = useState<CreatureStatus | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [error, setError] = useState('');
 
@@ -35,6 +36,7 @@ export function AgentDetail() {
       getAgentContext(id).then(setContext).catch(console.error);
       getAgentLineage(id).then(setLineage).catch(console.error);
       getCompetenceMap(id).then(setCompetence).catch(console.error);
+      getCreatureStatus(id).then(setCreatureStatus).catch(console.error);
     };
     fetchAll();
     const interval = setInterval(fetchAll, 5000);
@@ -141,6 +143,31 @@ export function AgentDetail() {
       {/* OVERVIEW — the athlete profile */}
       {activeTab === 'overview' && (
         <div>
+          {/* Creature status — one-line inner state */}
+          {creatureStatus && (
+            <div className="mb-6 px-4 py-3 rounded-xl border text-sm" style={{
+              backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border)',
+              color: 'var(--text-secondary)',
+            }}>
+              <span className="font-medium" style={{
+                color: creatureStatus.mood === 'thriving' ? 'var(--accent)' :
+                       creatureStatus.mood === 'struggling' ? 'var(--status-error)' :
+                       creatureStatus.mood === 'waiting' ? 'var(--text-muted)' : 'var(--text-primary)'
+              }}>
+                {creatureStatus.mood}
+              </span>
+              {creatureStatus.knowledge_count > 0 && (
+                <span className="text-[var(--text-muted)]"> / {creatureStatus.knowledge_count} facts learned</span>
+              )}
+              {creatureStatus.top_strength && (
+                <span className="text-[var(--text-muted)]"> / best at {creatureStatus.top_strength[0]} ({Math.round(creatureStatus.top_strength[1] * 100)}%)</span>
+              )}
+              {creatureStatus.top_weakness && creatureStatus.top_weakness[1] < 0.5 && (
+                <span style={{ color: 'var(--status-error)' }}> / struggling with {creatureStatus.top_weakness[0]} ({Math.round(creatureStatus.top_weakness[1] * 100)}%)</span>
+              )}
+            </div>
+          )}
+
           {/* Vital signs — just the two that matter */}
           <div className="grid grid-cols-2 gap-4 mb-8 max-w-md">
             <div className="p-4 rounded-xl border" style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border)' }}>

@@ -214,12 +214,24 @@ pub async fn chat_completions(
                 let has_specialist = children.iter().any(|c| c.2 == entry.domain);
 
                 if !has_specialist {
-                    // Inject warning into system prompt so the agent is careful
+                    // Inject warning with specific past failures from knowledge
+                    let all_knowledge = crate::knowledge::list_knowledge(&db, &agent.id, 100).unwrap_or_default();
+                    let domain_warnings: Vec<String> = all_knowledge.iter()
+                        .filter(|k| k.category == "warning" && k.content.to_lowercase().contains(&entry.domain))
+                        .take(3)
+                        .map(|k| format!("  - {}", k.content))
+                        .collect();
+
                     if let Some(messages) = body["messages"].as_array_mut() {
-                        let warning = format!(
-                            "\n\nWARNING: You have a {:.0}% success rate in {} ({} tasks). Your response may need extra verification. Flag any uncertainty.",
+                        let mut warning = format!(
+                            "\n\nWARNING: You have a {:.0}% success rate in {} ({} tasks).",
                             entry.confidence * 100.0, entry.domain, entry.task_count
                         );
+                        if !domain_warnings.is_empty() {
+                            warning.push_str(&format!("\nPast issues in {}:\n{}\nAvoid these specific mistakes.", entry.domain, domain_warnings.join("\n")));
+                        } else {
+                            warning.push_str(" Your response may need extra verification. Flag any uncertainty.");
+                        }
                         if let Some(system_msg) = messages.iter_mut().find(|m| m["role"] == "system") {
                             if let Some(content) = system_msg["content"].as_str() {
                                 system_msg["content"] = serde_json::Value::String(format!("{}{}", content, warning));
@@ -996,8 +1008,9 @@ async fn finish_task(
                 (total, goals)
             };
 
-            // Reflection: every task in Alive Mode
-            let should_reflect = reflection_enabled && msgs.len() >= 2;
+            // Reflection: every task for first 10 (bootstrap), then every 3rd
+            let should_reflect = reflection_enabled && msgs.len() >= 2
+                && (total_tasks <= 10 || total_tasks % 3 == 0);
             if should_reflect {
                 crate::reflection::spawn_reflection(
                     state.clone(), agent_id.to_string(), provider.clone(),

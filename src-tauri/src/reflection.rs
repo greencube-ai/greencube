@@ -113,6 +113,14 @@ async fn run_reflection(
         let _ = crate::context::append_context(&db, agent_id, ctx);
     }
 
+    // Write reflection summary to scratchpad — feeds the idle thinker
+    let reflection_summary = format!(
+        "Last reflection: {} entries extracted. Domain: {}.",
+        knowledge_entries.len(),
+        domain.as_deref().unwrap_or("general")
+    );
+    let _ = crate::context::append_context(&db, agent_id, &reflection_summary);
+
     // Update competence tracking for this domain
     if let Some(ref d) = domain {
         let _ = crate::competence::update_competence(&db, agent_id, d, true, None);

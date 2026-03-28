@@ -205,6 +205,12 @@ pub async fn get_competence_map(agent_id: String, state: State<'_, Arc<AppState>
 }
 
 #[tauri::command]
+pub async fn get_creature_status(agent_id: String, state: State<'_, Arc<AppState>>) -> Result<crate::creature_status::CreatureStatus> {
+    let db = state.db.lock().await;
+    Ok(crate::creature_status::get_creature_status(&db, &agent_id))
+}
+
+#[tauri::command]
 pub async fn get_approval_rate(agent_id: String, state: State<'_, Arc<AppState>>) -> Result<f64> {
     let db = state.db.lock().await;
     crate::ratings::get_approval_rate(&db, &agent_id, 30)

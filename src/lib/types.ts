@@ -93,6 +93,14 @@ export interface Notification {
   source?: string;
 }
 
+export interface CreatureStatus {
+  mood: string;
+  top_strength?: [string, number];
+  top_weakness?: [string, number];
+  knowledge_count: number;
+  last_reflection_summary?: string;
+}
+
 export interface CompetenceEntry {
   domain: string;
   confidence: number;

@@ -107,19 +107,36 @@ pub async fn run_idle_thinker(state: Arc<AppState>) {
                 "You have used all your notifications for today. Do NOT use [notify].".to_string()
             };
 
+            // Build competence summary for the thinker
+            let competence_text = {
+                let db = state.db.lock().await;
+                let comp = crate::competence::get_competence_map(&db, &agent.id).unwrap_or_default();
+                if comp.is_empty() {
+                    "No competence data yet.".to_string()
+                } else {
+                    comp.iter().map(|c| format!("- {} {:.0}% ({} tasks, {})", c.domain, c.confidence * 100.0, c.task_count, c.trend)).collect::<Vec<_>>().join("\n")
+                }
+            };
+
             let prompt = format!(
                 r#"{}
 
-You are currently idle. No one has asked you anything.
-Review what you know and think independently.
+You are thinking between tasks. No one is asking you anything right now.
+
+STEP 1 — NOTICE: Look at your recent activity, knowledge, and competence. What stands out?
+STEP 2 — THINK: Pick the most important observation. What does it mean? Can you connect it to other things you know?
+STEP 3 — ACT: Based on your thinking, choose ONE action.
 
 Recent activity:
 {}
 
-Your knowledge base:
+Your knowledge:
 {}
 
-Your current context:
+Your competence:
+{}
+
+Your context:
 {}
 
 Your goals:
@@ -127,26 +144,25 @@ Your goals:
 
 {}
 
-Think about:
-1. Do any of your knowledge entries contradict each other?
-2. Are there gaps in what you know that could be filled by looking something up?
-3. Can you connect two or more facts to form a new insight?
-4. Is there anything worth telling your human about?
+Think step by step. Write your reasoning first, then ONE action tag at the end.
 
-Format your thoughts:
-[insight] A new understanding or connection
-[synthesis] New insight derived by connecting two or more existing facts
-[question] Something you'd like to explore
-[gap] Something missing from your knowledge
-[explore] URL — a specific URL to fetch and learn from (http only, max 1 per cycle)
-[notify] Something important to tell the human (sends a real notification — use wisely)
-[spawn] domain_name — if you have 20+ tasks and struggle in a domain (<55% success, 8+ tasks), spawn a specialist
+Actions:
+[notify] Tell the human something important (they'll see this as a notification)
+[synthesis] A new insight derived from connecting existing facts
+[explore] URL — fetch a URL to fill a knowledge gap (read-only, max 1)
+[insight] Store an observation for later
+[spawn] domain — create a specialist for a weak domain (needs 20+ tasks, <55% success)
 
-If you have nothing to think about, respond: IDLE
-Max 3 thoughts per cycle."#,
+Example:
+"Looking at recent activity, I see 3 tasks about database queries and 2 of them involved slow joins. My knowledge says the user hasn't set up indexes on the join columns.
+[notify] You've had 2 slow database joins this week. Adding indexes on the join columns would likely fix this."
+
+If nothing stands out, respond: IDLE
+One action only. Make it count."#,
                 time_context,
                 recent_text,
                 knowledge_text,
+                competence_text,
                 if context.is_empty() { "None set." } else { &context },
                 goals_text,
                 notif_budget,
