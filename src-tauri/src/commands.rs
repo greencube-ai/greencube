@@ -93,6 +93,17 @@ pub async fn save_config(
     state: State<'_, Arc<AppState>>,
 ) -> Result<()> {
     config::save_config(&config).map_err(|e| GreenCubeError::Config(e.to_string()))?;
+
+    // Sync API key to ALL providers in the database
+    if !config.llm.api_key.is_empty() {
+        let db = state.db.lock().await;
+        let _ = db.execute(
+            "UPDATE providers SET api_key = ?1, api_base_url = ?2, default_model = ?3",
+            rusqlite::params![config.llm.api_key, config.llm.api_base_url, config.llm.default_model],
+        );
+        tracing::info!("Synced API key from config to all providers");
+    }
+
     let mut current = state.config.write().await;
     *current = config;
     Ok(())

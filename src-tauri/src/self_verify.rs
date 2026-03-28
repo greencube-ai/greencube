@@ -65,7 +65,22 @@ async fn run_verification(
         .await?;
 
     if !response.status().is_success() {
-        return Ok(()); // Don't fail the task if verification fails
+        let status = response.status();
+        let error_text = response.text().await.unwrap_or_default();
+        tracing::warn!("Self-verify failed: HTTP {} — {}", status, &error_text[..error_text.len().min(200)]);
+        // Log to audit trail
+        let db = state.db.lock().await;
+        let _ = crate::permissions::audit::log_action(&db, &crate::permissions::audit::AuditEntry {
+            id: uuid::Uuid::new_v4().to_string(),
+            agent_id: agent_id.into(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            action_type: "background_error".into(),
+            action_detail: format!("Self-verify failed: HTTP {} — {}", status, &error_text[..error_text.len().min(200)]),
+            permission_result: "allowed".into(),
+            result: None, duration_ms: None, cost_cents: 0,
+            error: Some(format!("HTTP {}", status)),
+        });
+        return Ok(());
     }
 
     let body: serde_json::Value = response.json().await?;

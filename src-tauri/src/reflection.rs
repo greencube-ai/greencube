@@ -86,8 +86,21 @@ async fn run_reflection(
         .await?;
 
     if !response.status().is_success() {
+        let status = response.status();
         let error_text = response.text().await.unwrap_or_default();
-        anyhow::bail!("Reflection LLM call failed: {}", error_text);
+        // Log to audit trail so the user can see it
+        let db = state.db.lock().await;
+        let _ = crate::permissions::audit::log_action(&db, &crate::permissions::audit::AuditEntry {
+            id: uuid::Uuid::new_v4().to_string(),
+            agent_id: agent_id.into(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            action_type: "background_error".into(),
+            action_detail: format!("Reflection failed: HTTP {} — {}", status, &error_text[..error_text.len().min(200)]),
+            permission_result: "allowed".into(),
+            result: None, duration_ms: None, cost_cents: 0,
+            error: Some(format!("HTTP {}", status)),
+        });
+        anyhow::bail!("Reflection LLM call failed: HTTP {} — {}", status, error_text);
     }
 
     let body: serde_json::Value = response.json().await?;
