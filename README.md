@@ -47,3 +47,5 @@ npm run tauri dev
 requires: node 20+, rust 1.77+, docker (optional)
 
 [greencube.world](https://greencube.world) / [github](https://github.com/greencube-ai/greencube)
+
+MIT License © 2026 Hector Gras
