@@ -850,7 +850,7 @@ async fn stream_llm_response(
                         };
 
                         let should_reflect = reflection_enabled && original_messages.len() >= 2
-                            && (total_tasks == 1 || total_tasks % 3 == 0);
+                            && true;
 
                         if should_reflect {
                             crate::reflection::spawn_reflection(
@@ -996,9 +996,8 @@ async fn finish_task(
                 (total, goals)
             };
 
-            // Reflection: every 3rd task, every failed task, or first task ever (bootstrap)
-            let should_reflect = reflection_enabled && msgs.len() >= 2
-                && (total_tasks == 1 || total_tasks % 3 == 0);
+            // Reflection: every task in Alive Mode
+            let should_reflect = reflection_enabled && msgs.len() >= 2;
             if should_reflect {
                 crate::reflection::spawn_reflection(
                     state.clone(), agent_id.to_string(), provider.clone(),
