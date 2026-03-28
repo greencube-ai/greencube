@@ -9,19 +9,20 @@ use crate::state::AppState;
 const REFLECTION_PROMPT: &str = r#"Review the conversation above. Extract what you learned.
 
 You MUST format each learning as EXACTLY one of these tags on its own line:
-[fact] statement here
-[warning] statement here
+[fact valence=N] statement here
+[warning valence=N] statement here
 [preference] statement here
 [domain] one-word category of this task (e.g., python, css, database, api, devops)
 [context] brief note for your scratchpad
 
-Do NOT number the items. Do NOT add explanations. Just the tags, one per line.
+Valence is your emotional memory: -2=very frustrating, -1=difficult, 0=neutral, +1=went well, +2=excellent.
+Do NOT number the items. Just the tags, one per line.
 Always include exactly one [domain] tag.
 If nothing was learned, write only: NONE
 
 Example output:
-[fact] The user's API uses Bearer token authentication
-[warning] The /v2 endpoint returns 404 for unauthenticated requests
+[fact valence=1] The user's API uses Bearer token authentication
+[warning valence=-2] The /v2 endpoint returns 404 and was very frustrating to debug
 [domain] api
 [context] Working on payment integration, auth is done"#;
 
@@ -103,9 +104,9 @@ async fn run_reflection(
 
     let db = state.db.lock().await;
 
-    // Store knowledge entries
-    for (category, entry_content) in &knowledge_entries {
-        let _ = knowledge::insert_knowledge(&db, agent_id, entry_content, category, Some(task_id));
+    // Store knowledge entries with valence
+    for (category, entry_content, valence) in &knowledge_entries {
+        let _ = knowledge::insert_knowledge_with_valence(&db, agent_id, entry_content, category, Some(task_id), *valence);
     }
 
     // Update working context if provided
@@ -121,9 +122,10 @@ async fn run_reflection(
     );
     let _ = crate::context::append_context(&db, agent_id, &reflection_summary);
 
-    // Update competence tracking for this domain
+    // Update competence + task patterns for this domain
     if let Some(ref d) = domain {
         let _ = crate::competence::update_competence(&db, agent_id, d, true, None);
+        let _ = crate::task_patterns::record_task_timing(&db, agent_id, d);
         tracing::info!("Competence updated: agent {} domain '{}' (success)", agent_id, d);
     }
 

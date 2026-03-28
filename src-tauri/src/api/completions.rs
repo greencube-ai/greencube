@@ -370,7 +370,16 @@ pub async fn chat_completions(
                 let knowledge = crate::knowledge::recall_relevant(&db, &agent.id, last_user_msg, 10).unwrap_or_default();
                 if !knowledge.is_empty() {
                     let knowledge_text = knowledge.iter()
-                        .map(|k| format!("- [{}] {}", k.category, k.content))
+                        .map(|k| {
+                            let valence_note = match k.valence {
+                                -2 => " (very frustrating in past)",
+                                -1 => " (was difficult)",
+                                1 => " (went well before)",
+                                2 => " (was easy/excellent)",
+                                _ => "",
+                            };
+                            format!("- [{}] {}{}", k.category, k.content, valence_note)
+                        })
                         .collect::<Vec<_>>()
                         .join("\n");
                     let injection = format!("\n\n--- Things you know ---\n{}\n--- End knowledge ---", knowledge_text);

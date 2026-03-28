@@ -7,11 +7,12 @@ pub struct KnowledgeEntry {
     pub agent_id: String,
     pub content: String,
     pub source_task_id: Option<String>,
-    pub category: String, // fact, preference, warning, skill
+    pub category: String, // fact, preference, warning, skill, synthesis
     pub confidence: f64,
     pub created_at: String,
     pub last_used_at: Option<String>,
     pub use_count: i64,
+    pub valence: i32, // -2 to +2: emotional memory (-2=very frustrating, 0=neutral, +2=excellent)
 }
 
 pub fn insert_knowledge(
@@ -21,24 +22,36 @@ pub fn insert_knowledge(
     category: &str,
     source_task_id: Option<&str>,
 ) -> anyhow::Result<KnowledgeEntry> {
+    insert_knowledge_with_valence(conn, agent_id, content, category, source_task_id, 0)
+}
+
+pub fn insert_knowledge_with_valence(
+    conn: &Connection,
+    agent_id: &str,
+    content: &str,
+    category: &str,
+    source_task_id: Option<&str>,
+    valence: i32,
+) -> anyhow::Result<KnowledgeEntry> {
     let id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
-    tracing::info!("Knowledge extracted: [{}] {}", category, &content[..content.len().min(80)]);
+    let valence = valence.clamp(-2, 2);
+    tracing::info!("Knowledge extracted: [{}] (v={}) {}", category, valence, &content[..content.len().min(80)]);
     conn.execute(
-        "INSERT INTO knowledge (id, agent_id, content, source_task_id, category, confidence, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, 1.0, ?6)",
-        params![id, agent_id, content, source_task_id, category, now],
+        "INSERT INTO knowledge (id, agent_id, content, source_task_id, category, confidence, created_at, valence)
+         VALUES (?1, ?2, ?3, ?4, ?5, 1.0, ?6, ?7)",
+        params![id, agent_id, content, source_task_id, category, now, valence],
     )?;
     Ok(KnowledgeEntry {
         id, agent_id: agent_id.into(), content: content.into(),
         source_task_id: source_task_id.map(|s| s.into()), category: category.into(),
-        confidence: 1.0, created_at: now, last_used_at: None, use_count: 0,
+        confidence: 1.0, created_at: now, last_used_at: None, use_count: 0, valence,
     })
 }
 
 pub fn list_knowledge(conn: &Connection, agent_id: &str, limit: i64) -> anyhow::Result<Vec<KnowledgeEntry>> {
     let mut stmt = conn.prepare(
-        "SELECT id, agent_id, content, source_task_id, category, confidence, created_at, last_used_at, use_count
+        "SELECT id, agent_id, content, source_task_id, category, confidence, created_at, last_used_at, use_count, COALESCE(valence, 0)
          FROM knowledge WHERE agent_id = ?1 ORDER BY created_at DESC LIMIT ?2"
     )?;
     let entries = stmt.query_map(params![agent_id, limit], |row| {
@@ -46,12 +59,105 @@ pub fn list_knowledge(conn: &Connection, agent_id: &str, limit: i64) -> anyhow::
             id: row.get(0)?, agent_id: row.get(1)?, content: row.get(2)?,
             source_task_id: row.get(3)?, category: row.get(4)?, confidence: row.get(5)?,
             created_at: row.get(6)?, last_used_at: row.get(7)?, use_count: row.get(8)?,
+            valence: row.get(9)?,
         })
     })?.collect::<Result<Vec<_>, _>>()?;
     Ok(entries)
 }
 
-/// Recall relevant knowledge using keyword matching (same approach as episode recall).
+/// Smart recall: try semantic similarity via Ollama, fall back to keyword matching.
+pub async fn recall_smart(
+    conn: &Connection,
+    agent_id: &str,
+    query: &str,
+    limit: i64,
+) -> anyhow::Result<Vec<KnowledgeEntry>> {
+    // Try Ollama embedding endpoint
+    if let Ok(results) = recall_semantic(conn, agent_id, query, limit).await {
+        if !results.is_empty() {
+            return Ok(results);
+        }
+    }
+    // Fall back to keyword matching
+    recall_relevant(conn, agent_id, query, limit)
+}
+
+/// Semantic recall using Ollama's embedding API.
+/// Returns empty vec if Ollama isn't running.
+async fn recall_semantic(
+    conn: &Connection,
+    agent_id: &str,
+    query: &str,
+    limit: i64,
+) -> anyhow::Result<Vec<KnowledgeEntry>> {
+    // Get query embedding from Ollama
+    let client = reqwest::Client::new();
+    let resp = client.post("http://localhost:11434/api/embeddings")
+        .json(&serde_json::json!({"model": "nomic-embed-text", "prompt": query}))
+        .timeout(std::time::Duration::from_secs(5))
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+        anyhow::bail!("Ollama not available");
+    }
+
+    let body: serde_json::Value = resp.json().await?;
+    let query_embedding: Vec<f64> = body["embedding"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("no embedding"))?
+        .iter()
+        .filter_map(|v| v.as_f64())
+        .collect();
+
+    if query_embedding.is_empty() {
+        anyhow::bail!("empty embedding");
+    }
+
+    // Get all knowledge for this agent and compute cosine similarity
+    let all = list_knowledge(conn, agent_id, 200)?;
+    let mut scored: Vec<(f64, KnowledgeEntry)> = Vec::new();
+
+    for entry in all {
+        // Get embedding for this entry (cache would be better but this works for now)
+        let entry_resp = client.post("http://localhost:11434/api/embeddings")
+            .json(&serde_json::json!({"model": "nomic-embed-text", "prompt": &entry.content}))
+            .timeout(std::time::Duration::from_secs(5))
+            .send()
+            .await;
+
+        if let Ok(resp) = entry_resp {
+            if let Ok(body) = resp.json::<serde_json::Value>().await {
+                let entry_embedding: Vec<f64> = body["embedding"]
+                    .as_array()
+                    .unwrap_or(&vec![])
+                    .iter()
+                    .filter_map(|v| v.as_f64())
+                    .collect();
+
+                if entry_embedding.len() == query_embedding.len() {
+                    let similarity = cosine_similarity(&query_embedding, &entry_embedding);
+                    if similarity > 0.7 {
+                        scored.push((similarity, entry));
+                    }
+                }
+            }
+        }
+    }
+
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(scored.into_iter().take(limit as usize).map(|(_, e)| e).collect())
+}
+
+fn cosine_similarity(a: &[f64], b: &[f64]) -> f64 {
+    let dot: f64 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+    let mag_a: f64 = a.iter().map(|x| x * x).sum::<f64>().sqrt();
+    let mag_b: f64 = b.iter().map(|x| x * x).sum::<f64>().sqrt();
+    if mag_a == 0.0 || mag_b == 0.0 { return 0.0; }
+    dot / (mag_a * mag_b)
+}
+
+/// Recall relevant knowledge using keyword matching (fallback when Ollama unavailable).
 /// Returns max `limit` entries (capped at 10 for injection).
 pub fn recall_relevant(
     conn: &Connection,
@@ -85,7 +191,7 @@ pub fn recall_relevant(
     let capped_limit = limit.min(10); // Max 10 for injection
 
     let sql = format!(
-        "SELECT id, agent_id, content, source_task_id, category, confidence, created_at, last_used_at, use_count,
+        "SELECT id, agent_id, content, source_task_id, category, confidence, created_at, last_used_at, use_count, COALESCE(valence, 0),
                 ({score}) as relevance
          FROM knowledge
          WHERE agent_id = ?1 AND ({score}) > 0
@@ -102,6 +208,7 @@ pub fn recall_relevant(
             id: row.get(0)?, agent_id: row.get(1)?, content: row.get(2)?,
             source_task_id: row.get(3)?, category: row.get(4)?, confidence: row.get(5)?,
             created_at: row.get(6)?, last_used_at: row.get(7)?, use_count: row.get(8)?,
+            valence: row.get(9)?,
         })
     })?.collect::<Result<Vec<_>, _>>()?;
 
@@ -150,7 +257,7 @@ pub fn recall_habitat_knowledge(
 
     let score_expr = conditions.join(" + ");
     let sql = format!(
-        "SELECT a.name, k.id, k.agent_id, k.content, k.source_task_id, k.category, k.confidence, k.created_at, k.last_used_at, k.use_count
+        "SELECT a.name, k.id, k.agent_id, k.content, k.source_task_id, k.category, k.confidence, k.created_at, k.last_used_at, k.use_count, COALESCE(k.valence, 0)
          FROM knowledge k JOIN agents a ON a.id = k.agent_id
          WHERE k.agent_id != ?1 AND ({}) > 0
          ORDER BY ({}) DESC
@@ -167,6 +274,7 @@ pub fn recall_habitat_knowledge(
                 id: row.get(1)?, agent_id: row.get(2)?, content: row.get(3)?,
                 source_task_id: row.get(4)?, category: row.get(5)?, confidence: row.get(6)?,
                 created_at: row.get(7)?, last_used_at: row.get(8)?, use_count: row.get(9)?,
+                valence: row.get(10)?,
             }
         ))
     })?.collect::<Result<Vec<_>, _>>()?;
@@ -174,11 +282,10 @@ pub fn recall_habitat_knowledge(
 }
 
 /// Parse a reflection response into knowledge entries.
-/// Finds [tag] ANYWHERE in the text, not just at line starts.
-/// The LLM often puts tags mid-sentence: "1. Key facts: [fact] The user..."
-/// Returns (knowledge_lines, context_update) tuple.
-pub fn parse_reflection_response(response: &str) -> (Vec<(String, String)>, Option<String>, Option<String>) {
-    let mut knowledge = Vec::new();
+/// Finds [tag] or [tag valence=N] ANYWHERE in the text.
+/// Returns (knowledge_lines_with_valence, context_update, domain) tuple.
+pub fn parse_reflection_response(response: &str) -> (Vec<(String, String, i32)>, Option<String>, Option<String>) {
+    let mut knowledge: Vec<(String, String, i32)> = Vec::new(); // (category, content, valence)
     let mut context_update = None;
     let mut domain = None;
 
@@ -186,45 +293,45 @@ pub fn parse_reflection_response(response: &str) -> (Vec<(String, String)>, Opti
         return (knowledge, context_update, domain);
     }
 
-    let tags = ["[fact]", "[preference]", "[warning]", "[skill]", "[context]", "[domain]"];
+    // Match tags with optional valence: [fact], [fact valence=-1], [warning valence=2], etc.
+    let base_tags = ["fact", "preference", "warning", "skill", "context", "domain"];
 
     for line in response.lines() {
         let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
+        if trimmed.is_empty() { continue; }
 
-        // Find all tag positions in this line
-        let mut found: Vec<(usize, &str)> = Vec::new();
-        for tag in &tags {
-            let mut start = 0;
-            while let Some(pos) = trimmed[start..].find(tag) {
-                found.push((start + pos, tag));
-                start += pos + tag.len();
-            }
-        }
-        found.sort_by_key(|(pos, _)| *pos);
+        for base_tag in &base_tags {
+            // Find [tag] or [tag valence=N]
+            let simple_tag = format!("[{}]", base_tag);
+            let valence_prefix = format!("[{} valence=", base_tag);
 
-        // Extract content after each tag
-        for (i, (pos, tag)) in found.iter().enumerate() {
-            let content_start = pos + tag.len();
-            let content_end = if i + 1 < found.len() {
-                found[i + 1].0
+            let (found_pos, tag_end, valence) = if let Some(pos) = trimmed.find(&valence_prefix) {
+                // Parse valence number
+                let after_eq = pos + valence_prefix.len();
+                let close = trimmed[after_eq..].find(']').map(|p| after_eq + p);
+                if let Some(close_pos) = close {
+                    let val_str = &trimmed[after_eq..close_pos];
+                    let val: i32 = val_str.parse().unwrap_or(0).clamp(-2, 2);
+                    (Some(pos), close_pos + 1, val)
+                } else {
+                    continue;
+                }
+            } else if let Some(pos) = trimmed.find(&simple_tag) {
+                (Some(pos), pos + simple_tag.len(), 0)
             } else {
-                trimmed.len()
-            };
-            let content = trimmed[content_start..content_end].trim();
-            if content.is_empty() {
                 continue;
-            }
-            let category = tag.trim_start_matches('[').trim_end_matches(']');
-            if category == "context" {
-                context_update = Some(content.to_string());
-            } else if category == "domain" {
-                // Extract first word only as the domain name
-                domain = Some(content.split_whitespace().next().unwrap_or(content).to_lowercase());
-            } else {
-                knowledge.push((category.to_string(), content.to_string()));
+            };
+
+            if let Some(_pos) = found_pos {
+                let content = trimmed[tag_end..].trim();
+                if content.is_empty() { continue; }
+
+                match *base_tag {
+                    "context" => { context_update = Some(content.to_string()); }
+                    "domain" => { domain = Some(content.split_whitespace().next().unwrap_or(content).to_lowercase()); }
+                    _ => { knowledge.push((base_tag.to_string(), content.to_string(), valence)); }
+                }
+                break; // One tag per line
             }
         }
     }
@@ -341,6 +448,15 @@ NONE
         assert_eq!(knowledge[2].0, "warning");
         assert!(context.is_some());
         assert!(context.unwrap().contains("math"), "context should contain 'math'");
+    }
+
+    #[test]
+    fn test_parse_reflection_with_valence() {
+        let response = "[fact valence=-1] The Stripe webhook API was difficult\n[warning valence=-2] Rate limiting caused multiple failures";
+        let (knowledge, _, _) = parse_reflection_response(response);
+        assert_eq!(knowledge.len(), 2);
+        assert_eq!(knowledge[0].2, -1); // valence
+        assert_eq!(knowledge[1].2, -2); // valence
     }
 
     #[test]

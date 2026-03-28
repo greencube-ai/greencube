@@ -69,6 +69,9 @@ fn run_migrations(conn: &Connection) -> anyhow::Result<()> {
     if version < 8 {
         migrate_v7_to_v8(conn)?;
     }
+    if version < 9 {
+        migrate_v8_to_v9(conn)?;
+    }
     Ok(())
 }
 
@@ -506,6 +509,34 @@ fn migrate_v7_to_v8(conn: &Connection) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// v8 → v9: Add valence to knowledge entries + task_patterns table
+fn migrate_v8_to_v9(conn: &Connection) -> anyhow::Result<()> {
+    // Add valence column to knowledge
+    let has_valence: bool = conn.prepare("SELECT valence FROM knowledge LIMIT 0").is_ok();
+    if !has_valence {
+        conn.execute_batch("ALTER TABLE knowledge ADD COLUMN valence INTEGER DEFAULT 0;")?;
+    }
+
+    // Task timing patterns table
+    conn.execute_batch(r#"
+        CREATE TABLE IF NOT EXISTS task_patterns (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            domain TEXT NOT NULL,
+            day_of_week INTEGER NOT NULL,
+            hour INTEGER NOT NULL,
+            frequency INTEGER NOT NULL DEFAULT 1,
+            last_seen TEXT NOT NULL,
+            FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_task_patterns_agent ON task_patterns(agent_id);
+    "#)?;
+
+    set_version(conn, 9)?;
+    tracing::info!("Database migrated to v9: valence + task_patterns");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -558,7 +589,7 @@ mod tests {
     fn test_schema_version_is_8() {
         let conn = init_memory_database().expect("init");
         let version = get_version(&conn).expect("version");
-        assert_eq!(version, 8);
+        assert_eq!(version, 9);
     }
 
     #[test]
@@ -574,7 +605,7 @@ mod tests {
         run_migrations(&conn).expect("first");
         // Running again should be a no-op (version is already 3)
         run_migrations(&conn).expect("second should not fail");
-        assert_eq!(get_version(&conn).expect("v"), 8);
+        assert_eq!(get_version(&conn).expect("v"), 9);
     }
 
     #[test]

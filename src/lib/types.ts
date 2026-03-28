@@ -77,6 +77,7 @@ export interface KnowledgeEntry {
   created_at: string;
   last_used_at?: string;
   use_count: number;
+  valence: number; // -2 to +2: emotional memory
 }
 
 export interface DockerStatus {

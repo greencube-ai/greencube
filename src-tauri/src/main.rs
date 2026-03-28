@@ -32,6 +32,7 @@ mod sandbox;
 mod self_verify;
 mod spawn;
 mod state;
+mod task_patterns;
 mod task_queue;
 mod time_sense;
 mod token_usage;

@@ -76,6 +76,13 @@ pub async fn run_idle_thinker(state: Arc<AppState>) {
             };
             // DB lock released here!
 
+            // Get task patterns
+            let patterns_text = {
+                let db = state.db.lock().await;
+                let patterns = crate::task_patterns::get_strong_patterns(&db, &agent.id).unwrap_or_default();
+                crate::task_patterns::format_patterns_for_prompt(&patterns)
+            };
+
             // Build thinking prompt
             let knowledge_text = if knowledge_entries.is_empty() {
                 "None yet.".to_string()
@@ -167,6 +174,9 @@ One action only. Make it count."#,
                 goals_text,
                 notif_budget,
             );
+
+            // Append patterns if any
+            let prompt = if patterns_text.is_empty() { prompt } else { format!("{}\n{}", prompt, patterns_text) };
 
             // Make LLM call (no DB lock held!)
             let client = reqwest::Client::new();
