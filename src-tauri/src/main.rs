@@ -28,6 +28,7 @@ mod providers;
 mod ratings;
 mod reflection;
 mod sandbox;
+mod self_verify;
 mod spawn;
 mod state;
 mod task_queue;

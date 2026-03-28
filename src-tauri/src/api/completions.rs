@@ -685,6 +685,14 @@ async fn stream_llm_response(
                                 state_clone.clone(), agent_id_owned.clone(), provider_clone.clone(),
                             );
                         }
+
+                        // Self-verification
+                        if original_messages.len() >= 2 {
+                            crate::self_verify::spawn_verification(
+                                state_clone.clone(), agent_id_owned.clone(), provider_clone.clone(),
+                                original_messages.clone(), task_id_owned.clone(), None,
+                            );
+                        }
                     }
 
                     return; // Stream done
@@ -835,6 +843,18 @@ async fn finish_task(
                 crate::reflection::spawn_reflection(
                     state.clone(), agent_id.to_string(), provider.clone(),
                     msgs.to_vec(), task_id.to_string(),
+                );
+            }
+        }
+    }
+
+    // Self-verification: agent rates its own output quality (Alive Mode only)
+    if alive_mode {
+        if let (Some(provider), Some(msgs)) = (provider, messages) {
+            if msgs.len() >= 2 {
+                crate::self_verify::spawn_verification(
+                    state.clone(), agent_id.to_string(), provider.clone(),
+                    msgs.to_vec(), task_id.to_string(), None,
                 );
             }
         }

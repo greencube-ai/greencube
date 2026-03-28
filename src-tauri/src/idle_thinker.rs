@@ -64,12 +64,15 @@ pub async fn run_idle_thinker(state: Arc<AppState>) {
             };
 
             // Gather context (brief DB lock, then release before LLM call)
-            let (knowledge_entries, context, active_goals) = {
+            let (knowledge_entries, context, active_goals, recent_episodes, notifs_remaining) = {
                 let db = state.db.lock().await;
                 let knowledge = knowledge::list_knowledge(&db, &agent.id, 10).unwrap_or_default();
                 let ctx = crate::context::get_context(&db, &agent.id).unwrap_or_default();
                 let goals_list = goals::list_goals(&db, &agent.id, Some("active")).unwrap_or_default();
-                (knowledge, ctx, goals_list)
+                let episodes = crate::memory::episodic::get_episodes(&db, &agent.id, 5, None).unwrap_or_default();
+                let notif_count = notifications::count_idle_notifications_today(&db, &agent.id).unwrap_or(0);
+                let remaining = MAX_IDLE_NOTIFICATIONS_PER_DAY - notif_count;
+                (knowledge, ctx, goals_list, episodes, remaining)
             };
             // DB lock released here!
 
@@ -90,11 +93,28 @@ pub async fn run_idle_thinker(state: Arc<AppState>) {
 
             let time_context = crate::time_sense::time_context_for_agent(&agent.updated_at);
 
+            let recent_text = if recent_episodes.is_empty() {
+                "No recent activity.".to_string()
+            } else {
+                recent_episodes.iter()
+                    .map(|e| format!("- [{}] {}", e.event_type, e.summary))
+                    .collect::<Vec<_>>().join("\n")
+            };
+
+            let notif_budget = if notifs_remaining > 0 {
+                format!("You have {} notification{} remaining today. Only use [notify] for things the human genuinely needs to know. Trivial observations are not worth a notification.", notifs_remaining, if notifs_remaining == 1 { "" } else { "s" })
+            } else {
+                "You have used all your notifications for today. Do NOT use [notify].".to_string()
+            };
+
             let prompt = format!(
                 r#"{}
 
 You are currently idle. No one has asked you anything.
 Review what you know and think independently.
+
+Recent activity:
+{}
 
 Your knowledge base:
 {}
@@ -105,25 +125,29 @@ Your current context:
 Your goals:
 {}
 
+{}
+
 Think about:
 1. Do any of your knowledge entries contradict each other?
 2. Are there gaps in what you know that would be useful to fill?
 3. Do you see connections between things you've learned?
-4. Is there anything you should tell your human about?
+4. Is there anything worth telling your human about? (patterns, repeated issues, suggestions)
 
 Format your thoughts:
 [insight] A new understanding or connection
 [question] Something you'd like to explore
 [gap] Something missing from your knowledge
-[notify] Something important to tell the human (this will send a notification)
+[notify] Something important to tell the human (sends a real notification — use wisely)
 [spawn] domain_name — if you have 20+ tasks and struggle in a domain (<55% success, 8+ tasks), spawn a specialist
 
 If you have nothing to think about, respond: IDLE
 Max 3 thoughts per cycle."#,
                 time_context,
+                recent_text,
                 knowledge_text,
                 if context.is_empty() { "None set." } else { &context },
                 goals_text,
+                notif_budget,
             );
 
             // Make LLM call (no DB lock held!)
