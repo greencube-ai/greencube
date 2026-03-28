@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Agent, Episode, AuditEntry, AppConfig, Provider, KnowledgeEntry, Notification } from './types';
+import type { Agent, Episode, AuditEntry, AppConfig, Provider, KnowledgeEntry, Notification, CompetenceEntry } from './types';
 
 export async function getAgents(): Promise<Agent[]> {
   return invoke<Agent[]>('get_agents');
@@ -129,6 +129,10 @@ export async function updateProvider(
 
 export async function deleteProvider(id: string): Promise<void> {
   return invoke<void>('delete_provider', { id });
+}
+
+export async function getCompetenceMap(agentId: string): Promise<CompetenceEntry[]> {
+  return invoke<CompetenceEntry[]>('get_competence_map', { agentId });
 }
 
 // Notifications

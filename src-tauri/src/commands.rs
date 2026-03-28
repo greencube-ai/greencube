@@ -198,6 +198,13 @@ pub async fn rate_response(agent_id: String, task_id: String, rating: i32, state
 }
 
 #[tauri::command]
+pub async fn get_competence_map(agent_id: String, state: State<'_, Arc<AppState>>) -> Result<Vec<crate::competence::CompetenceEntry>> {
+    let db = state.db.lock().await;
+    crate::competence::get_competence_map(&db, &agent_id)
+        .map_err(|e| GreenCubeError::Internal(e.to_string()))
+}
+
+#[tauri::command]
 pub async fn get_approval_rate(agent_id: String, state: State<'_, Arc<AppState>>) -> Result<f64> {
     let db = state.db.lock().await;
     crate::ratings::get_approval_rate(&db, &agent_id, 30)

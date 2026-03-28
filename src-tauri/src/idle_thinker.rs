@@ -129,14 +129,16 @@ Your goals:
 
 Think about:
 1. Do any of your knowledge entries contradict each other?
-2. Are there gaps in what you know that would be useful to fill?
-3. Do you see connections between things you've learned?
-4. Is there anything worth telling your human about? (patterns, repeated issues, suggestions)
+2. Are there gaps in what you know that could be filled by looking something up?
+3. Can you connect two or more facts to form a new insight?
+4. Is there anything worth telling your human about?
 
 Format your thoughts:
 [insight] A new understanding or connection
+[synthesis] New insight derived by connecting two or more existing facts
 [question] Something you'd like to explore
 [gap] Something missing from your knowledge
+[explore] URL — a specific URL to fetch and learn from (http only, max 1 per cycle)
 [notify] Something important to tell the human (sends a real notification — use wisely)
 [spawn] domain_name — if you have 20+ tasks and struggle in a domain (<55% success, 8+ tasks), spawn a specialist
 
@@ -195,10 +197,10 @@ Max 3 thoughts per cycle."#,
             };
 
             let mut spawn_request: Option<String> = None;
+            let mut explore_url: Option<String> = None;
             {
                 let db = state.db.lock().await;
-                // Parse tags anywhere in line (not just at start — LLMs put tags mid-sentence)
-                let tag_names = ["[notify]", "[insight]", "[question]", "[gap]", "[connection]", "[spawn]"];
+                let tag_names = ["[notify]", "[insight]", "[synthesis]", "[question]", "[gap]", "[explore]", "[connection]", "[spawn]"];
                 for line in content.lines() {
                     let trimmed = line.trim();
                     if trimmed.is_empty() || trimmed == "IDLE" { continue; }
@@ -230,6 +232,20 @@ Max 3 thoughts per cycle."#,
                                 "[gap]" => {
                                     let _ = insert_thought(&db, &agent.id, text, "gap");
                                 }
+                                "[synthesis]" => {
+                                    let _ = insert_thought(&db, &agent.id, text, "synthesis");
+                                    let _ = knowledge::insert_knowledge(&db, &agent.id, text, "synthesis", None);
+                                    tracing::info!("Knowledge synthesis: agent {} created: {}", agent.id, &text[..text.len().min(80)]);
+                                }
+                                "[explore]" => {
+                                    // Read-only investigation — max 1 per cycle
+                                    if explore_url.is_none() {
+                                        let url = text.trim().to_string();
+                                        if url.starts_with("http") {
+                                            explore_url = Some(url);
+                                        }
+                                    }
+                                }
                                 "[connection]" => {
                                     let _ = insert_thought(&db, &agent.id, text, "connection");
                                     let _ = knowledge::insert_knowledge(&db, &agent.id, text, "fact", None);
@@ -254,6 +270,48 @@ Max 3 thoughts per cycle."#,
                 match crate::spawn::execute_spawn(&state, &agent.id, &domain).await {
                     Ok(child_name) => tracing::info!("Idle thinker spawned {} for agent {}", child_name, agent.id),
                     Err(e) => tracing::warn!("Idle thinker spawn failed for {}: {}", domain, e),
+                }
+            }
+
+            // Autonomous investigation — read-only http_get
+            if let Some(url) = explore_url {
+                tracing::info!("Idle thinker exploring: {} for agent {}", url, agent.id);
+                match reqwest::Client::new()
+                    .get(&url)
+                    .timeout(std::time::Duration::from_secs(10))
+                    .send().await
+                {
+                    Ok(resp) if resp.status().is_success() => {
+                        let body_text = resp.text().await.unwrap_or_default();
+                        let truncated: String = body_text.chars().take(2000).collect();
+                        // Summarize as a knowledge entry
+                        let summary: String = truncated.lines()
+                            .filter(|l| !l.trim().is_empty())
+                            .take(5)
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        let summary: String = summary.chars().take(200).collect();
+
+                        let db = state.db.lock().await;
+                        let _ = knowledge::insert_knowledge(&db, &agent.id, &format!("Explored {}: {}", url, summary), "fact", None);
+                        let _ = crate::memory::episodic::insert_episode(&db, &crate::memory::Episode {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            agent_id: agent.id.clone(),
+                            created_at: chrono::Utc::now().to_rfc3339(),
+                            event_type: "exploration".into(),
+                            summary: format!("Investigated: {}", url),
+                            raw_data: Some(summary), task_id: None,
+                            outcome: Some("success".into()),
+                            tokens_used: 0, cost_cents: 0,
+                        });
+                        tracing::info!("Exploration complete for agent {}: {}", agent.id, url);
+                    }
+                    Ok(resp) => {
+                        tracing::warn!("Exploration failed for {}: HTTP {}", url, resp.status());
+                    }
+                    Err(e) => {
+                        tracing::warn!("Exploration failed for {}: {}", url, e);
+                    }
                 }
             }
 

@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getAgent, getEpisodes, getAuditLog, getKnowledge, getAgentContext, getAgentLineage } from '../lib/invoke';
+import { getAgent, getEpisodes, getAuditLog, getKnowledge, getAgentContext, getAgentLineage, getCompetenceMap } from '../lib/invoke';
 import type { AgentLineage } from '../lib/invoke';
+import type { CompetenceEntry } from '../lib/types';
 import { onActivityUpdate } from '../lib/events';
 import { StatusBadge } from '../components/StatusBadge';
 import { MemoryViewer } from '../components/MemoryViewer';
@@ -20,6 +21,7 @@ export function AgentDetail() {
   const [knowledge, setKnowledge] = useState<KnowledgeEntry[]>([]);
   const [context, setContext] = useState('');
   const [lineage, setLineage] = useState<AgentLineage | null>(null);
+  const [competence, setCompetence] = useState<CompetenceEntry[]>([]);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [error, setError] = useState('');
 
@@ -32,6 +34,7 @@ export function AgentDetail() {
       getKnowledge(id).then(setKnowledge).catch(console.error);
       getAgentContext(id).then(setContext).catch(console.error);
       getAgentLineage(id).then(setLineage).catch(console.error);
+      getCompetenceMap(id).then(setCompetence).catch(console.error);
     };
     fetchAll();
     const interval = setInterval(fetchAll, 5000);
@@ -151,6 +154,28 @@ export function AgentDetail() {
               </div>
             </div>
           </div>
+
+          {/* Competence map — visual bars */}
+          {competence.length > 0 && (
+            <div className="mb-8">
+              <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-wide mb-3">Competence</div>
+              <div className="space-y-2">
+                {competence.map((c) => {
+                  const pct = Math.round(c.confidence * 100);
+                  const color = pct >= 80 ? 'var(--accent)' : pct >= 50 ? '#eab308' : 'var(--status-error)';
+                  return (
+                    <div key={c.domain} className="flex items-center gap-3">
+                      <span className="text-xs font-medium w-20 text-right text-[var(--text-secondary)]">{c.domain}</span>
+                      <div className="flex-1 h-2 rounded-full" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
+                        <div className="h-2 rounded-full transition-all duration-500" style={{ width: `${Math.max(pct, 2)}%`, backgroundColor: color }} />
+                      </div>
+                      <span className="text-[10px] w-16 text-[var(--text-muted)]">{pct}% ({c.task_count})</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Capabilities — small, unobtrusive */}
           <div className="flex flex-wrap gap-1.5 mb-8">

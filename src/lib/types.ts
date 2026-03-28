@@ -93,6 +93,15 @@ export interface Notification {
   source?: string;
 }
 
+export interface CompetenceEntry {
+  domain: string;
+  confidence: number;
+  task_count: number;
+  success_count: number;
+  trend: string;
+  last_assessed: string;
+}
+
 export interface Provider {
   id: string;
   name: string;

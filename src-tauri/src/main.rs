@@ -199,6 +199,7 @@ fn main() {
             commands::reset_app,
             commands::get_agent_lineage,
             commands::debug_spawn,
+            commands::get_competence_map,
             commands::rate_response,
             commands::get_approval_rate,
             commands::get_token_usage_today,

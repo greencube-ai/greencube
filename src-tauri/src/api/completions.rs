@@ -196,6 +196,42 @@ pub async fn chat_completions(
         }
     }
 
+    // 2c. COMPETENCE WARNING: If agent is weak in detected domain but no specialist, warn
+    {
+        let user_msg_lower = body["messages"]
+            .as_array()
+            .and_then(|msgs| msgs.iter().rev().find(|m| m["role"] == "user"))
+            .and_then(|m| m["content"].as_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        let db = state.db.lock().await;
+        let competence_map = crate::competence::get_competence_map(&db, &agent.id).unwrap_or_default();
+
+        for entry in &competence_map {
+            if entry.task_count >= 5 && entry.confidence < 0.50 && user_msg_lower.contains(&entry.domain) {
+                let children = crate::spawn::get_children(&db, &agent.id);
+                let has_specialist = children.iter().any(|c| c.2 == entry.domain);
+
+                if !has_specialist {
+                    // Inject warning into system prompt so the agent is careful
+                    if let Some(messages) = body["messages"].as_array_mut() {
+                        let warning = format!(
+                            "\n\nWARNING: You have a {:.0}% success rate in {} ({} tasks). Your response may need extra verification. Flag any uncertainty.",
+                            entry.confidence * 100.0, entry.domain, entry.task_count
+                        );
+                        if let Some(system_msg) = messages.iter_mut().find(|m| m["role"] == "system") {
+                            if let Some(content) = system_msg["content"].as_str() {
+                                system_msg["content"] = serde_json::Value::String(format!("{}{}", content, warning));
+                            }
+                        }
+                    }
+                }
+                break;
+            }
+        }
+    }
+
     // 3. LOG TASK START
     let task_id = uuid::Uuid::new_v4().to_string();
     let user_message_summary = body["messages"]
@@ -335,6 +371,33 @@ pub async fn chat_completions(
                     // Fall back to episode-based recall if no knowledge entries yet
                     if let Ok(memories) = episodic::recall_relevant_episodes(&db, &agent.id, last_user_msg, 5) {
                         inject_memories(messages, &memories);
+                    }
+                }
+            }
+        }
+    }
+
+    // 4b. CROSS-AGENT LEARNING: inject relevant knowledge from other agents in the habitat
+    if let Some(last_user_msg) = body["messages"].as_array()
+        .and_then(|msgs| msgs.iter().rev().find(|m| m["role"] == "user"))
+        .and_then(|m| m["content"].as_str())
+        .map(|s| s.to_string())
+    {
+        let db = state.db.lock().await;
+        let habitat_knowledge = crate::knowledge::recall_habitat_knowledge(&db, &agent.id, &last_user_msg, 3).unwrap_or_default();
+        drop(db);
+
+        if !habitat_knowledge.is_empty() {
+            let habitat_text = habitat_knowledge.iter()
+                .map(|(agent_name, k)| format!("- [from {}] {}", agent_name, k.content))
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            if let Some(messages) = body["messages"].as_array_mut() {
+                let injection = format!("\n\n--- Knowledge from other agents in your habitat ---\n{}\n--- End habitat knowledge ---", habitat_text);
+                if let Some(system_msg) = messages.iter_mut().find(|m| m["role"] == "system") {
+                    if let Some(content) = system_msg["content"].as_str() {
+                        system_msg["content"] = serde_json::Value::String(format!("{}{}", content, injection));
                     }
                 }
             }

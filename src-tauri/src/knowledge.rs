@@ -117,6 +117,62 @@ pub fn recall_relevant(
     Ok(entries)
 }
 
+/// Cross-agent learning: find knowledge from OTHER agents that's relevant to a query.
+/// Excludes the requesting agent. Returns entries from habitat neighbors.
+pub fn recall_habitat_knowledge(
+    conn: &Connection,
+    excluded_agent_id: &str,
+    query: &str,
+    limit: i64,
+) -> anyhow::Result<Vec<(String, KnowledgeEntry)>> {
+    // agent_name, entry pairs
+    let words: Vec<String> = query
+        .split_whitespace()
+        .map(|w| w.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect::<String>())
+        .filter(|w| w.len() > 3)
+        .filter(|w| !STOP_WORDS.contains(&w.as_str()))
+        .collect();
+
+    if words.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let mut conditions = Vec::new();
+    let mut all_params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(excluded_agent_id.to_string())];
+
+    for (i, word) in words.iter().enumerate() {
+        conditions.push(format!(
+            "(CASE WHEN LOWER(k.content) LIKE '%' || ?{} || '%' THEN 1 ELSE 0 END)",
+            i + 2
+        ));
+        all_params.push(Box::new(word.clone()));
+    }
+
+    let score_expr = conditions.join(" + ");
+    let sql = format!(
+        "SELECT a.name, k.id, k.agent_id, k.content, k.source_task_id, k.category, k.confidence, k.created_at, k.last_used_at, k.use_count
+         FROM knowledge k JOIN agents a ON a.id = k.agent_id
+         WHERE k.agent_id != ?1 AND ({}) > 0
+         ORDER BY ({}) DESC
+         LIMIT {}",
+        score_expr, score_expr, limit
+    );
+
+    let mut stmt = conn.prepare(&sql)?;
+    let params_refs: Vec<&dyn rusqlite::types::ToSql> = all_params.iter().map(|p| p.as_ref()).collect();
+    let rows = stmt.query_map(params_refs.as_slice(), |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            KnowledgeEntry {
+                id: row.get(1)?, agent_id: row.get(2)?, content: row.get(3)?,
+                source_task_id: row.get(4)?, category: row.get(5)?, confidence: row.get(6)?,
+                created_at: row.get(7)?, last_used_at: row.get(8)?, use_count: row.get(9)?,
+            }
+        ))
+    })?.collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
 /// Parse a reflection response into knowledge entries.
 /// Finds [tag] ANYWHERE in the text, not just at line starts.
 /// The LLM often puts tags mid-sentence: "1. Key facts: [fact] The user..."
