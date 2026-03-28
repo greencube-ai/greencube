@@ -3,138 +3,129 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GreenCube — one line. your agent remembers.</title>
-    <meta name="description" content="A local runtime where AI agents learn from experience. One env var gives your agent persistent memory.">
+    <title>GreenCube</title>
     <style>
-        *{margin:0;padding:0;box-sizing:border-box}
-        :root{--bg:#09090b;--card:#111113;--border:#1e1e22;--text:#e4e4e7;--dim:#a1a1aa;--muted:#71717a;--green:#22c55e;--purple:#a855f7}
-        body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;-webkit-font-smoothing:antialiased}
-        .c{max-width:680px;margin:0 auto;padding:0 24px}
-        a{color:var(--dim);text-decoration:none}a:hover{color:var(--green)}
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background: #09090b;
+            color: #e4e4e7;
+            -webkit-font-smoothing: antialiased;
+        }
+        .page { max-width: 560px; margin: 0 auto; padding: 80px 24px; }
+        a { color: #a1a1aa; text-decoration: none; }
+        a:hover { color: #22c55e; }
 
-        header{padding:80px 0 0;text-align:center}
-        .logo{display:inline-flex;align-items:center;gap:10px;margin-bottom:48px}
-        .logo svg{width:28px;height:28px}
-        .logo span{font-size:18px;font-weight:700;letter-spacing:-0.02em}
-        h1{font-size:38px;font-weight:700;line-height:1.15;letter-spacing:-0.03em;margin-bottom:16px}
-        h1 em{font-style:normal;color:var(--green)}
-        .sub{font-size:16px;color:var(--dim);margin-bottom:40px}
-        h2{font-size:22px;font-weight:700;letter-spacing:-0.02em;margin-bottom:8px}
-        .label{font-size:11px;color:var(--green);text-transform:uppercase;letter-spacing:0.08em;font-weight:600;margin-bottom:10px}
-        section{margin-bottom:72px}
+        /* Hero */
+        .name { font-size: 15px; font-weight: 600; color: #22c55e; margin-bottom: 32px; letter-spacing: 0.02em; }
+        h1 { font-size: 32px; font-weight: 700; line-height: 1.25; letter-spacing: -0.03em; margin-bottom: 16px; }
+        .desc { font-size: 15px; color: #a1a1aa; line-height: 1.7; margin-bottom: 48px; }
 
-        .cmd{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:18px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}
-        .cmd code{font-family:'SF Mono','Fira Code',Consolas,monospace;font-size:14px;color:var(--green);white-space:nowrap;overflow-x:auto}
-        .copy{background:none;border:1px solid var(--border);color:var(--muted);padding:5px 12px;border-radius:5px;font-size:11px;cursor:pointer;transition:all .15s;flex-shrink:0}
-        .copy:hover{border-color:var(--green);color:var(--green)}
-        .note{font-size:12px;color:var(--muted)}
+        /* Install steps */
+        .install { margin-bottom: 56px; }
+        .install-title { font-size: 13px; color: #71717a; margin-bottom: 16px; font-weight: 500; }
+        .step { display: flex; gap: 12px; margin-bottom: 20px; align-items: flex-start; }
+        .step-n { width: 24px; height: 24px; border-radius: 6px; background: rgba(34,197,94,0.1); color: #22c55e; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 2px; }
+        .step-text { font-size: 14px; color: #a1a1aa; line-height: 1.6; }
+        .step-text strong { color: #e4e4e7; font-weight: 600; }
+        .code { display: flex; align-items: center; justify-content: space-between; background: #111113; border: 1px solid #1e1e22; border-radius: 8px; padding: 14px 16px; margin-top: 8px; gap: 12px; }
+        .code code { font-family: 'SF Mono', Consolas, monospace; font-size: 13px; color: #22c55e; white-space: nowrap; overflow-x: auto; }
+        .code button { background: none; border: 1px solid #1e1e22; color: #71717a; padding: 4px 10px; border-radius: 4px; font-size: 10px; cursor: pointer; flex-shrink: 0; }
+        .code button:hover { border-color: #22c55e; color: #22c55e; }
 
-        .dl{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-bottom:12px}
-        .btn{display:inline-block;background:var(--green);color:#000;font-size:13px;font-weight:600;padding:10px 24px;border-radius:7px;text-decoration:none;transition:filter .15s}
-        .btn:hover{filter:brightness(1.1);color:#000}
-        .btn-outline{background:none;border:1px solid var(--border);color:var(--dim)}
-        .btn-outline:hover{border-color:var(--muted);color:var(--text)}
-        .small{font-size:12px;color:var(--muted);text-align:center}
+        /* What it does */
+        .what { margin-bottom: 56px; }
+        .what-title { font-size: 13px; color: #71717a; margin-bottom: 16px; font-weight: 500; }
+        .what-item { padding: 12px 0; border-bottom: 1px solid #1e1e22; font-size: 14px; }
+        .what-item:first-child { border-top: 1px solid #1e1e22; }
+        .what-item strong { color: #e4e4e7; font-weight: 600; }
+        .what-item span { color: #71717a; }
 
-        .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-        .card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px}
-        .card h3{font-size:14px;font-weight:600;margin-bottom:4px}
-        .card p{font-size:12px;color:var(--muted);line-height:1.5}
+        /* Alive */
+        .alive { border-left: 2px solid #a855f7; padding-left: 20px; margin-bottom: 56px; }
+        .alive-label { font-size: 11px; color: #a855f7; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; margin-bottom: 8px; }
+        .alive p { font-size: 13px; color: #71717a; line-height: 1.7; }
 
-        .alive{background:linear-gradient(135deg,rgba(34,197,94,.03),rgba(168,85,247,.03));border:1px solid var(--border);border-radius:12px;padding:24px}
-        .badge{display:inline-block;padding:3px 10px;border-radius:5px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;background:rgba(168,85,247,.1);color:var(--purple);margin-bottom:12px}
-        .alive h3{font-size:17px;font-weight:700;margin-bottom:6px}
-        .alive>p{font-size:13px;color:var(--muted);margin-bottom:16px}
-        .af{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-        .af div{font-size:12px;color:var(--dim);padding:6px 10px;background:rgba(255,255,255,.02);border-radius:6px}
-        .af strong{color:var(--text);font-weight:600}
+        /* Download */
+        .buttons { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+        .btn { display: inline-block; background: #22c55e; color: #000; font-size: 13px; font-weight: 600; padding: 10px 22px; border-radius: 7px; }
+        .btn:hover { filter: brightness(1.1); color: #000; }
+        .btn-dim { background: #18181b; color: #a1a1aa; }
+        .btn-dim:hover { color: #e4e4e7; }
+        .fine { font-size: 11px; color: #71717a; margin-bottom: 56px; }
 
-        footer{text-align:center;padding:40px 0 64px;border-top:1px solid var(--border);font-size:12px;color:var(--muted)}
+        /* Footer */
+        .foot { font-size: 11px; color: #3f3f46; padding-top: 32px; border-top: 1px solid #1e1e22; }
 
-        @media(max-width:640px){
-            header{padding-top:48px}h1{font-size:28px}.grid,.af{grid-template-columns:1fr}
-            .cmd code{font-size:11px}.dl{flex-direction:column;align-items:center}
+        @media (max-width: 480px) {
+            .page { padding: 48px 20px; }
+            h1 { font-size: 26px; }
+            .code code { font-size: 11px; }
+            .buttons { flex-direction: column; }
         }
     </style>
 </head>
 <body>
-<div class="c">
-    <header>
-        <div class="logo">
-            <svg viewBox="0 0 512 512"><rect x="64" y="64" width="384" height="384" rx="48" ry="48" fill="none" stroke="#22C55E" stroke-width="40"/></svg>
-            <span>GreenCube</span>
-        </div>
-        <h1>your agent forgets everything.<br><em>one line. now it remembers.</em></h1>
-        <p class="sub">a local runtime that gives any AI agent persistent memory, safe tool execution, and a full audit trail</p>
-        <div class="dl">
-            <a href="https://github.com/greencube-ai/greencube/releases/latest" class="btn">Download for Windows</a>
-            <a href="https://github.com/greencube-ai/greencube/releases/latest" class="btn">Download for Mac</a>
-            <a href="https://github.com/greencube-ai/greencube" class="btn btn-outline">GitHub</a>
-        </div>
-        <p class="small">linux coming soon. open source. MIT license.</p>
-    </header>
+<div class="page">
 
-    <section>
-        <div class="label">one line</div>
-        <div class="cmd">
+    <div class="name">GreenCube</div>
+    <h1>your AI agent forgets everything between sessions. this fixes that.</h1>
+    <p class="desc">GreenCube runs on your machine and sits between your agent and its LLM. every request goes through it. your agent gets persistent memory, safe tool execution, and a full log of everything it does. one env variable. nothing else changes.</p>
+
+    <div class="install">
+        <div class="install-title">how to set it up</div>
+
+        <div class="step">
+            <div class="step-n">1</div>
+            <div class="step-text"><strong>download and open greencube.</strong> the proxy starts automatically on localhost:9000. it sits in your system tray.</div>
+        </div>
+
+        <div class="step">
+            <div class="step-n">2</div>
+            <div class="step-text"><strong>add one line before running your agent.</strong> this tells it to route through greencube instead of directly to the API.</div>
+        </div>
+
+        <div class="code">
             <code>export OPENAI_API_BASE=http://localhost:9000/v1</code>
-            <button class="copy" onclick="copy(this)">copy</button>
+            <button onclick="copy(this)">copy</button>
         </div>
-        <p class="note">add this before running your agent. works with OpenClaw, LangChain, CrewAI, Python, curl — anything OpenAI-compatible.</p>
-    </section>
 
-    <section>
-        <div class="label">what your agent gets</div>
-        <h2>everything it was missing</h2>
         <br>
-        <div class="grid">
-            <div class="card">
-                <h3>persistent memory</h3>
-                <p>remembers across sessions. relevant context injected automatically before every LLM call.</p>
-            </div>
-            <div class="card">
-                <h3>docker sandbox</h3>
-                <p>tool calls run in isolated containers. nothing touches your machine.</p>
-            </div>
-            <div class="card">
-                <h3>audit trail</h3>
-                <p>every action logged. see what your agent did, when, and why.</p>
-            </div>
-            <div class="card">
-                <h3>multi-provider</h3>
-                <p>each agent can use a different LLM. openai, ollama, openrouter.</p>
-            </div>
-        </div>
-    </section>
 
-    <section>
-        <div class="alive">
-            <div class="badge">opt-in</div>
-            <h3>alive mode</h3>
-            <p>agents that learn from their own experience. costs additional tokens. off by default.</p>
-            <div class="af">
-                <div><strong>reflection</strong> — reviews what it learned</div>
-                <div><strong>knowledge</strong> — extracts structured facts</div>
-                <div><strong>agent-to-agent</strong> — agents message each other</div>
-                <div><strong>spawn specialist</strong> — creates children when struggling</div>
-            </div>
+        <div class="step">
+            <div class="step-n">3</div>
+            <div class="step-text"><strong>run your agent like normal.</strong> greencube handles the rest. open it anytime to see what your agent learned.</div>
         </div>
-    </section>
 
-    <section style="text-align:center">
-        <div class="dl">
-            <a href="https://github.com/greencube-ai/greencube/releases/latest" class="btn">Download for Windows</a>
-            <a href="https://github.com/greencube-ai/greencube/releases/latest" class="btn">Download for Mac</a>
-        </div>
-        <p class="small"><a href="https://github.com/greencube-ai/greencube">source on github</a> — 130 tests, 36 rust modules, open source</p>
-    </section>
+        <p style="font-size:12px;color:#71717a;margin-top:8px;">works with OpenClaw, LangChain, CrewAI, Python, curl — anything that uses the OpenAI API format.</p>
+    </div>
 
-    <footer>
-        <p>built with rust + tauri + react + sqlite</p>
-    </footer>
+    <div class="what">
+        <div class="what-title">what your agent gets</div>
+        <div class="what-item"><strong>memory</strong> <span>— remembers across sessions. relevant context injected into every request.</span></div>
+        <div class="what-item"><strong>sandbox</strong> <span>— tool calls run in docker containers. nothing touches your machine.</span></div>
+        <div class="what-item"><strong>audit log</strong> <span>— every action recorded. see what it did, when, and the result.</span></div>
+        <div class="what-item"><strong>multi-provider</strong> <span>— each agent can use a different LLM. openai, ollama, openrouter.</span></div>
+        <div class="what-item"><strong>streaming</strong> <span>— SSE passthrough. responses stream in real time.</span></div>
+    </div>
+
+    <div class="alive">
+        <div class="alive-label">alive mode (opt-in)</div>
+        <p>turn this on and agents start learning from their own experience. they reflect after tasks, extract knowledge, track their competence, message other agents, and create specialist children when they're struggling. uses extra tokens. off by default.</p>
+    </div>
+
+    <div class="buttons">
+        <a href="https://github.com/greencube-ai/greencube/releases/latest" class="btn">Download for Windows</a>
+        <a href="https://github.com/greencube-ai/greencube/releases/latest" class="btn">Download for Mac</a>
+        <a href="https://github.com/greencube-ai/greencube" class="btn btn-dim">GitHub</a>
+    </div>
+    <p class="fine">open source. MIT license. 130 tests. rust + tauri + react + sqlite.</p>
+
+    <div class="foot">greencube.world</div>
+
 </div>
 <script>
-function copy(btn){navigator.clipboard.writeText('export OPENAI_API_BASE=http://localhost:9000/v1');btn.textContent='copied';setTimeout(()=>btn.textContent='copy',2000)}
+function copy(b){navigator.clipboard.writeText('export OPENAI_API_BASE=http://localhost:9000/v1');b.textContent='copied';setTimeout(()=>b.textContent='copy',2000)}
 </script>
 </body>
 </html>
