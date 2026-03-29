@@ -42,31 +42,6 @@ export function Settings() {
     <div className="max-w-lg">
       <h1 className="text-2xl font-bold mb-8">Settings</h1>
 
-      {/* Alive Mode */}
-      <div className="rounded-xl border p-5 mb-8 transition-all" style={{
-        backgroundColor: config.ui.alive_mode ? 'rgba(34, 197, 94, 0.04)' : 'var(--bg-secondary)',
-        borderColor: config.ui.alive_mode ? 'var(--accent)' : 'var(--border)',
-      }}>
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-base font-semibold">{config.ui.alive_mode ? 'Alive' : 'Core'}</div>
-            <p className="text-xs text-[var(--text-muted)] mt-1">
-              {config.ui.alive_mode ? 'Reflection, knowledge extraction, drives, moods active.' : 'Proxy + memory only. Zero background tokens.'}
-            </p>
-          </div>
-          <button onClick={async () => {
-            const c = JSON.parse(JSON.stringify(config)) as AppConfig;
-            c.ui.alive_mode = !config.ui.alive_mode;
-            setConfig(c);
-            await saveConfig(c);
-            dispatch({ type: 'SET_CONFIG', config: c });
-          }} className="px-3 py-1.5 rounded-lg text-xs font-medium border" style={config.ui.alive_mode
-            ? { borderColor: 'var(--accent)', color: 'var(--accent)' }
-            : { borderColor: 'var(--border)', color: 'var(--text-secondary)' }
-          }>{config.ui.alive_mode ? 'Switch to Core' : 'Switch to Alive'}</button>
-        </div>
-      </div>
-
       {/* API Key */}
       <div className="mb-6">
         <label className="block text-xs text-[var(--text-muted)] mb-1">API Key</label>

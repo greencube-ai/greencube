@@ -865,13 +865,12 @@ async fn stream_llm_response(
                         let _ = crate::metrics::record_metric(&db, &agent_id_owned);
                     }
 
-                    // Trigger background features (reflection, profile, goals, journal)
+                    // Trigger background features — always on
                     let config = state_clone.config.read().await;
-                    let alive_mode = config.ui.alive_mode;
                     let reflection_enabled = config.llm.self_reflection_enabled;
                     drop(config);
 
-                    if alive_mode {
+                    {
                         let (total_tasks, active_goal_count) = {
                             let db = state_clone.db.lock().await;
                             let total = registry::get_agent(&db, &agent_id_owned).ok().flatten().map(|a| a.total_tasks).unwrap_or(0);
@@ -1020,31 +1019,38 @@ async fn finish_task(
         let _ = crate::mood::update_mood(&db, agent_id);
     }
 
-    // Background features only run in Alive Mode
+    // Background features — always on, no modes
     let config = state.config.read().await;
-    let alive_mode = config.ui.alive_mode;
     let reflection_enabled = config.llm.self_reflection_enabled;
     drop(config);
 
-    if success && alive_mode {
-        if let (Some(provider), Some(msgs)) = (provider, messages) {
-            let (total_tasks, active_goal_count) = {
-                let db = state.db.lock().await;
-                let total = registry::get_agent(&db, agent_id).ok().flatten().map(|a| a.total_tasks).unwrap_or(0);
-                let goals = crate::goals::count_active_goals(&db, agent_id).unwrap_or(0);
-                (total, goals)
-            };
+    if let (Some(provider), Some(msgs)) = (provider, messages) {
+        let (total_tasks, active_goal_count) = {
+            let db = state.db.lock().await;
+            let total = registry::get_agent(&db, agent_id).ok().flatten().map(|a| a.total_tasks).unwrap_or(0);
+            let goals = crate::goals::count_active_goals(&db, agent_id).unwrap_or(0);
+            (total, goals)
+        };
 
-            // Reflection: every task for first 5 (bootstrap), then every 3rd
-            let should_reflect = reflection_enabled && msgs.len() >= 2
-                && (total_tasks <= 5 || total_tasks % 3 == 0);
-            if should_reflect {
-                crate::reflection::spawn_reflection(
-                    state.clone(), agent_id.to_string(), provider.clone(),
-                    msgs.to_vec(), task_id.to_string(),
-                );
-            }
+        // Reflection: every task for first 5 (bootstrap), then every 3rd
+        let should_reflect = reflection_enabled && msgs.len() >= 2
+            && (total_tasks <= 5 || total_tasks % 3 == 0);
+        if should_reflect {
+            crate::reflection::spawn_reflection(
+                state.clone(), agent_id.to_string(), provider.clone(),
+                msgs.to_vec(), task_id.to_string(),
+            );
+        }
 
+        // Reflection on failed tasks always runs
+        if !success && !should_reflect && reflection_enabled && msgs.len() >= 2 {
+            crate::reflection::spawn_reflection(
+                state.clone(), agent_id.to_string(), provider.clone(),
+                msgs.to_vec(), task_id.to_string(),
+            );
+        }
+
+        if success {
             crate::profile::maybe_regenerate(
                 state.clone(), agent_id.to_string(), provider.clone(), total_tasks,
             );
@@ -1063,34 +1069,47 @@ async fn finish_task(
                 );
             }
         }
-    }
 
-    // Reflection on FAILED tasks runs even in Core Mode (if reflection enabled)
-    if !success && reflection_enabled {
-        if let (Some(provider), Some(msgs)) = (provider, messages) {
-            if msgs.len() >= 2 {
-                crate::reflection::spawn_reflection(
-                    state.clone(), agent_id.to_string(), provider.clone(),
-                    msgs.to_vec(), task_id.to_string(),
-                );
-            }
+        // Self-verification
+        if msgs.len() >= 2 {
+            crate::self_verify::spawn_verification(
+                state.clone(), agent_id.to_string(), provider.clone(),
+                msgs.to_vec(), task_id.to_string(), None,
+            );
         }
     }
 
-    // Self-verification: agent rates its own output quality (Alive Mode only)
-    if alive_mode {
-        if let (Some(provider), Some(msgs)) = (provider, messages) {
-            if msgs.len() >= 2 {
-                crate::self_verify::spawn_verification(
-                    state.clone(), agent_id.to_string(), provider.clone(),
-                    msgs.to_vec(), task_id.to_string(), None,
-                );
-            }
-        }
+    // Post-task chain: narrative episode for the idle thinker
+    {
+        let domain_guess = {
+            let db = state.db.lock().await;
+            crate::competence::get_most_recent_domain(&db, agent_id).ok().flatten()
+                .unwrap_or_else(|| "general".to_string())
+        };
+        let will_reflect = success && provider.is_some() && messages.map_or(false, |m| m.len() >= 2);
+        let chain_summary = format!(
+            "Task in {}: {} → {}reflection pending → self-verify pending",
+            domain_guess,
+            if success { "success" } else { "failure" },
+            if will_reflect { "" } else { "no " },
+        );
+        let db = state.db.lock().await;
+        let _ = episodic::insert_episode(&db, &Episode {
+            id: uuid::Uuid::new_v4().to_string(),
+            agent_id: agent_id.into(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            event_type: "task_chain".into(),
+            summary: chain_summary,
+            raw_data: None,
+            task_id: Some(task_id.into()),
+            outcome: Some(if success { "success" } else { "failure" }.into()),
+            tokens_used: 0,
+            cost_cents: 0,
+        });
     }
 
-    // Check drives — if any exceed threshold, act immediately
-    if alive_mode {
+    // Check drives — act immediately if threshold exceeded
+    {
         let actions = {
             let db = state.db.lock().await;
             crate::drives::check_drives(&db, agent_id)
@@ -1098,7 +1117,6 @@ async fn finish_task(
         for action in actions {
             match action {
                 crate::drives::DriveAction::ExploreCuriosity => {
-                    // Discharge and let the next idle cycle handle it (drive ensures it fires)
                     let db = state.db.lock().await;
                     let _ = crate::drives::discharge_drive(&db, agent_id, "curiosity");
                 }
@@ -1107,7 +1125,6 @@ async fn finish_task(
                     let _ = crate::drives::discharge_drive(&db, agent_id, "social");
                 }
                 crate::drives::DriveAction::ForceSelfVerify => {
-                    // Already fired self-verify above if alive_mode
                     let db = state.db.lock().await;
                     let _ = crate::drives::discharge_drive(&db, agent_id, "verification");
                 }
@@ -1226,8 +1243,6 @@ async fn execute_tool_call(state: &AppState, agent_id: &str, tool_name: &str, ar
                 Some(d) => d,
                 None => return "Error: spawn_specialist requires 'domain' argument".into(),
             };
-            let alive = state.config.read().await.ui.alive_mode;
-            if !alive { return "spawn_specialist requires Alive Mode. Enable in Settings.".into(); }
             match crate::spawn::execute_spawn(state, agent_id, domain).await {
                 Ok(child_name) => format!(
                     "Successfully created specialist: {}. You can delegate {} tasks to them using send_message(to=\"{}\", content=\"...\").",
@@ -1264,9 +1279,6 @@ async fn execute_tool_call(state: &AppState, agent_id: &str, tool_name: &str, ar
                 Some(b) => b,
                 None => return "Error: fork_agent requires 'branch_b' argument".into(),
             };
-            let alive = state.config.read().await.ui.alive_mode;
-            if !alive { return "fork_agent requires Alive Mode. Enable in Settings.".into(); }
-
             // Get the original messages from the current conversation context
             // We pass empty messages since the fork will use the branch descriptions as the task
             let fork_messages = vec![

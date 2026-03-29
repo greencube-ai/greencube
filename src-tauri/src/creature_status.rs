@@ -8,6 +8,9 @@ pub struct CreatureStatus {
     pub top_weakness: Option<(String, f64)>,
     pub knowledge_count: i64,
     pub last_reflection_summary: Option<String>,
+    pub active_domain: Option<String>,
+    pub recent_insight: Option<String>,
+    pub pending_investigation: Option<String>,
 }
 
 pub fn get_creature_status(conn: &Connection, agent_id: &str) -> CreatureStatus {
@@ -36,6 +39,29 @@ pub fn get_creature_status(conn: &Connection, agent_id: &str) -> CreatureStatus 
         |row| row.get(0),
     ).ok();
 
+    // Active domain: most recent task_chain episode's domain
+    let active_domain: Option<String> = conn.query_row(
+        "SELECT summary FROM episodes WHERE agent_id = ?1 AND event_type = 'task_chain' ORDER BY created_at DESC LIMIT 1",
+        rusqlite::params![agent_id],
+        |row| row.get::<_, String>(0),
+    ).ok().and_then(|s| {
+        // Parse "Task in python: success → ..." to extract domain
+        s.strip_prefix("Task in ").and_then(|rest| rest.split(':').next()).map(|d| d.to_string())
+    });
+
+    // Recent insight: last idle thought of type insight or synthesis
+    let recent_insight: Option<String> = conn.query_row(
+        "SELECT content FROM idle_thoughts WHERE agent_id = ?1 AND thought_type IN ('insight', 'synthesis', 'connection') ORDER BY created_at DESC LIMIT 1",
+        rusqlite::params![agent_id],
+        |row| row.get(0),
+    ).ok();
+
+    // Pending investigation: top curiosity from the queue
+    let pending_investigation = crate::curiosity::get_top_curiosity(conn, agent_id)
+        .ok()
+        .flatten()
+        .map(|c| c.topic);
+
     // Determine mood
     let mood = if knowledge_count == 0 {
         "waiting".to_string()
@@ -55,5 +81,8 @@ pub fn get_creature_status(conn: &Connection, agent_id: &str) -> CreatureStatus 
         top_weakness,
         knowledge_count,
         last_reflection_summary: last_reflection,
+        active_domain,
+        recent_insight,
+        pending_investigation,
     }
 }

@@ -80,6 +80,31 @@ export function AgentDetail() {
 
       {activeTab === 'overview' && (
         <div>
+          {/* Creature inner life */}
+          {creatureStatus && (creatureStatus.active_domain || creatureStatus.recent_insight || creatureStatus.pending_investigation) && (
+            <div className="mb-6 p-4 rounded-xl border text-xs" style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border)' }}>
+              <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-wide mb-2">state of mind</div>
+              <div className="space-y-1 text-[var(--text-secondary)]">
+                {creatureStatus.active_domain && (
+                  <div>Last worked on: <span className="text-[var(--text-primary)] font-medium">{creatureStatus.active_domain}</span></div>
+                )}
+                {creatureStatus.recent_insight && (
+                  <div>Noticed: <span className="text-[var(--text-primary)]">{creatureStatus.recent_insight.length > 120 ? creatureStatus.recent_insight.slice(0, 120) + '...' : creatureStatus.recent_insight}</span></div>
+                )}
+                {creatureStatus.pending_investigation && (
+                  <div>Curious about: <span style={{ color: '#06b6d4' }}>{creatureStatus.pending_investigation}</span></div>
+                )}
+                {creatureStatus.top_strength && (
+                  <div>Strength: <span style={{ color: 'var(--accent)' }}>{creatureStatus.top_strength[0]} ({Math.round(creatureStatus.top_strength[1] * 100)}%)</span>
+                    {creatureStatus.top_weakness && creatureStatus.top_weakness[0] !== creatureStatus.top_strength[0] && (
+                      <span className="text-[var(--text-muted)]"> · Weakness: <span style={{ color: 'var(--status-error)' }}>{creatureStatus.top_weakness[0]} ({Math.round(creatureStatus.top_weakness[1] * 100)}%)</span></span>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Stats */}
           <div className="grid grid-cols-2 gap-4 mb-8 max-w-md">
             <div className="p-4 rounded-xl border" style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border)' }}>

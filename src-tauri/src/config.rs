@@ -42,8 +42,8 @@ pub struct SandboxConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiConfig {
     pub onboarding_complete: bool,
-    #[serde(default)]
-    pub alive_mode: bool, // false = Core Mode (zero background tokens), true = Alive Mode
+    #[serde(default = "default_true")]
+    pub alive_mode: bool, // kept for config compat, always true — no modes
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

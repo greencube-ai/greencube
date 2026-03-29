@@ -100,10 +100,6 @@ pub async fn execute_spawn(
     let (parent, provider, competence_entry, domain_knowledge, domain_feedback) = {
         let db = state.db.lock().await;
 
-        // Check alive mode
-        let alive = state.config.read().await.ui.alive_mode;
-        if !alive { anyhow::bail!("spawn_specialist requires Alive Mode"); }
-
         // Get parent
         let parent = registry::get_agent(&db, parent_agent_id)?
             .ok_or_else(|| anyhow::anyhow!("Parent agent not found"))?;

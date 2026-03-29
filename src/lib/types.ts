@@ -100,6 +100,9 @@ export interface CreatureStatus {
   top_weakness?: [string, number];
   knowledge_count: number;
   last_reflection_summary?: string;
+  active_domain?: string;
+  recent_insight?: string;
+  pending_investigation?: string;
 }
 
 export interface CompetenceEntry {

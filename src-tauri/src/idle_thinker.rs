@@ -16,9 +16,9 @@ pub async fn run_idle_thinker(state: Arc<AppState>) {
     loop {
         interval.tick().await;
 
-        // Check if Alive Mode is enabled AND idle thinking is enabled
+        // Check if idle thinking is enabled
         let config = state.config.read().await;
-        if !config.ui.alive_mode || !config.idle.idle_thinking_enabled {
+        if !config.idle.idle_thinking_enabled {
             continue;
         }
         let idle_minutes = config.idle.idle_minutes_before_think;

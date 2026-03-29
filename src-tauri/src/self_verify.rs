@@ -122,13 +122,20 @@ async fn run_verification(
             tracing::info!("Competence updated: agent {} domain '{}' (FAILURE from self-verify)", agent_id, d);
         }
 
-        // Store as knowledge: agent knows it failed
+        // Store as actionable knowledge so the idle thinker can chain on it
         {
             let db = state.db.lock().await;
+            let domain_label = effective_domain.as_deref().unwrap_or("unknown");
             let _ = crate::knowledge::insert_knowledge(
                 &db, agent_id,
-                &format!("Self-assessment: produced poor quality output. Reason: {}", reason),
+                &format!("FAILED in {}: {}. Need to investigate why.", domain_label, reason),
                 "warning", Some(task_id),
+            );
+
+            // Also write to scratchpad so idle thinker sees it immediately
+            let _ = crate::context::append_context(
+                &db, agent_id,
+                &format!("Self-verify: BAD in {}. Reason: {}", domain_label, reason),
             );
         }
     } else {

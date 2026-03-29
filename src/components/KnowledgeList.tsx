@@ -18,7 +18,7 @@ export function KnowledgeList({ entries }: KnowledgeListProps) {
     return (
       <EmptyState
         message="No knowledge yet"
-        subtitle="Enable Alive Mode and send a few messages. Agents extract knowledge after tasks."
+        subtitle="Send a few messages. Knowledge gets extracted automatically after tasks."
       />
     );
   }
