@@ -298,8 +298,7 @@ pub async fn chat_completions(
         }
     }
 
-    // 3b. INJECT LEARNED PREFERENCES
-    // The agent's behavior changes based on what it learned about the user.
+    // 3b. INJECT LEARNED PREFERENCES + MISTAKES TO AVOID
     {
         let db = state.db.lock().await;
         let all_knowledge = crate::knowledge::list_knowledge(&db, &agent.id, 100).unwrap_or_default();
@@ -308,15 +307,29 @@ pub async fn chat_completions(
             .take(5)
             .map(|k| format!("- {}", k.content))
             .collect();
-        if !preferences.is_empty() {
+        let corrections: Vec<String> = all_knowledge.iter()
+            .filter(|k| k.category == "correction")
+            .take(3)
+            .map(|k| format!("- {}", k.content))
+            .collect();
+        if !preferences.is_empty() || !corrections.is_empty() {
             if let Some(messages) = body["messages"].as_array_mut() {
-                let pref_text = format!(
-                    "\n\n--- Apply these learned preferences ---\n{}\n--- End preferences ---",
-                    preferences.join("\n")
-                );
+                let mut injection = String::new();
+                if !preferences.is_empty() {
+                    injection.push_str(&format!(
+                        "\n\n--- Apply these learned preferences ---\n{}\n--- End preferences ---",
+                        preferences.join("\n")
+                    ));
+                }
+                if !corrections.is_empty() {
+                    injection.push_str(&format!(
+                        "\n\n--- Mistakes to avoid (user feedback) ---\n{}\n--- End mistakes ---",
+                        corrections.join("\n")
+                    ));
+                }
                 if let Some(system_msg) = messages.iter_mut().find(|m| m["role"] == "system") {
                     if let Some(content) = system_msg["content"].as_str() {
-                        system_msg["content"] = serde_json::Value::String(format!("{}{}", content, pref_text));
+                        system_msg["content"] = serde_json::Value::String(format!("{}{}", content, injection));
                     }
                 }
             }
@@ -962,6 +975,16 @@ async fn stream_llm_response(
     Sse::new(stream).keep_alive(KeepAlive::default()).into_response()
 }
 
+/// Set urgency flag so idle thinker reacts within 60s instead of 15min.
+async fn increment_urgency(state: &AppState, agent_id: &str) {
+    let db = state.db.lock().await;
+    let key = format!("urgent_think_{}", agent_id);
+    let _ = db.execute(
+        "INSERT INTO config_store (key, value) VALUES (?1, '1') ON CONFLICT(key) DO UPDATE SET value = '1'",
+        rusqlite::params![key],
+    );
+}
+
 async fn finish_task(
     state: Arc<AppState>,
     agent_id: &str,
@@ -1012,7 +1035,7 @@ async fn finish_task(
         // Initialize and charge drives
         let _ = crate::drives::ensure_drives(&db, agent_id);
         let _ = crate::drives::charge_drive(&db, agent_id, "curiosity", 0.1);
-        let _ = crate::drives::charge_drive(&db, agent_id, "social", 0.05);
+        let _ = crate::drives::charge_drive(&db, agent_id, "social", 0.15);
         let _ = crate::drives::charge_drive(&db, agent_id, "verification", 0.2);
 
         // Update mood
@@ -1119,14 +1142,55 @@ async fn finish_task(
                 crate::drives::DriveAction::ExploreCuriosity => {
                     let db = state.db.lock().await;
                     let _ = crate::drives::discharge_drive(&db, agent_id, "curiosity");
+                    // Pop top curiosity, insert as episode so idle thinker picks it up
+                    if let Ok(Some(curiosity)) = crate::curiosity::get_top_curiosity(&db, agent_id) {
+                        let _ = crate::curiosity::mark_explored(&db, &curiosity.id);
+                        let _ = episodic::insert_episode(&db, &Episode {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            agent_id: agent_id.into(),
+                            created_at: chrono::Utc::now().to_rfc3339(),
+                            event_type: "curiosity_impulse".into(),
+                            summary: format!("Curiosity fired: {}", curiosity.topic),
+                            raw_data: None, task_id: None,
+                            outcome: None, tokens_used: 0, cost_cents: 0,
+                        });
+                        // Set urgency flag so idle thinker reacts fast
+                        increment_urgency(&state, agent_id).await;
+                        tracing::info!("Curiosity drive acted: {} for agent {}", curiosity.topic, agent_id);
+                    }
                 }
                 crate::drives::DriveAction::ReachOutToAgent => {
                     let db = state.db.lock().await;
                     let _ = crate::drives::discharge_drive(&db, agent_id, "social");
+                    // Cross-pollinate: find knowledge from other agents
+                    let domain = crate::competence::get_most_recent_domain(&db, agent_id).ok().flatten()
+                        .unwrap_or_else(|| "general".to_string());
+                    let habitat = crate::knowledge::recall_habitat_knowledge(&db, agent_id, &domain, 1).unwrap_or_default();
+                    if let Some((neighbor_name, entry)) = habitat.first() {
+                        let msg = format!("Your neighbor {} knows about {}: {}", neighbor_name, domain, entry.content);
+                        let _ = crate::notifications::create_notification(&db, agent_id, &msg, "insight", "social_drive");
+                        if let Some(handle) = &state.app_handle {
+                            let _ = handle.emit("notification-new", serde_json::json!({"agent_id": agent_id}));
+                        }
+                        tracing::info!("Social drive acted: cross-pollinated from {} for agent {}", neighbor_name, agent_id);
+                    }
                 }
                 crate::drives::DriveAction::ForceSelfVerify => {
                     let db = state.db.lock().await;
                     let _ = crate::drives::discharge_drive(&db, agent_id, "verification");
+                    // Surface past warnings to scratchpad so creature reviews them
+                    let warnings = crate::knowledge::list_knowledge(&db, agent_id, 50).unwrap_or_default();
+                    let recent_warnings: Vec<String> = warnings.iter()
+                        .filter(|k| k.category == "warning")
+                        .take(3)
+                        .map(|k| k.content.clone())
+                        .collect();
+                    if !recent_warnings.is_empty() {
+                        let _ = crate::context::append_context(
+                            &db, agent_id,
+                            &format!("Verification check — review before next task: {}", recent_warnings.join("; ")),
+                        );
+                    }
                 }
             }
         }

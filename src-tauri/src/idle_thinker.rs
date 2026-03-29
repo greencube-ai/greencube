@@ -37,13 +37,26 @@ pub async fn run_idle_thinker(state: Arc<AppState>) {
         for agent in agents {
             if agent.status != "idle" { continue; }
 
-            // Check if agent has been idle long enough
-            let idle_duration = chrono::Utc::now()
-                .signed_duration_since(
-                    chrono::DateTime::parse_from_rfc3339(&agent.updated_at)
-                        .unwrap_or_else(|_| chrono::Utc::now().into())
-                );
-            if idle_duration.num_minutes() < idle_minutes as i64 { continue; }
+            // Check for urgency flag — react within 60s to important events
+            let urgent_key = format!("urgent_think_{}", agent.id);
+            let is_urgent = {
+                let db = state.db.lock().await;
+                let urgent = get_config_counter(&db, &urgent_key) > 0;
+                if urgent {
+                    let _ = db.execute("DELETE FROM config_store WHERE key = ?1", params![urgent_key]);
+                }
+                urgent
+            };
+
+            if !is_urgent {
+                // Normal path: check if agent has been idle long enough
+                let idle_duration = chrono::Utc::now()
+                    .signed_duration_since(
+                        chrono::DateTime::parse_from_rfc3339(&agent.updated_at)
+                            .unwrap_or_else(|_| chrono::Utc::now().into())
+                    );
+                if idle_duration.num_minutes() < idle_minutes as i64 { continue; }
+            }
 
             // Check daily cycle count
             let today = chrono::Utc::now().format("%Y-%m-%d").to_string();

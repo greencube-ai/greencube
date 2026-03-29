@@ -140,6 +140,12 @@ async fn run_reflection(
     );
     let _ = crate::context::append_context(&db, agent_id, &reflection_summary);
 
+    // Compact scratchpad if it's getting long — dedup and smart truncation
+    let ctx_len = crate::context::get_context(&db, agent_id).map(|c| c.len()).unwrap_or(0);
+    if ctx_len > 800 {
+        let _ = crate::context::compact_context(&db, agent_id);
+    }
+
     // Update context cluster for this domain
     if let Some(ref d) = domain {
         let _ = crate::context_clusters::update_cluster(&db, agent_id, d);

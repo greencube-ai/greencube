@@ -24,7 +24,7 @@ pub fn ensure_drives(conn: &Connection, agent_id: &str) -> anyhow::Result<()> {
 
     if count == 0 {
         let now = chrono::Utc::now().to_rfc3339();
-        for (name, threshold) in &[("curiosity", 1.0), ("social", 1.5), ("verification", 1.0)] {
+        for (name, threshold) in &[("curiosity", 1.0), ("social", 0.8), ("verification", 1.0)] {
             conn.execute(
                 "INSERT INTO drives (agent_id, drive_name, energy, threshold, last_discharged_at) VALUES (?1, ?2, 0.0, ?3, ?4)",
                 params![agent_id, name, threshold, now],

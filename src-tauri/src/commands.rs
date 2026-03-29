@@ -204,12 +204,23 @@ pub async fn rate_response(agent_id: String, task_id: String, rating: i32, state
     crate::ratings::rate_response(&db, &agent_id, &task_id, rating)
         .map_err(|e| GreenCubeError::Internal(e.to_string()))?;
 
-    // Thumbs down → lower competence in the agent's most recent domain
+    // Thumbs down → lower competence + store as knowledge for future avoidance
     if rating < 0 {
         if let Ok(Some(domain)) = crate::competence::get_most_recent_domain(&db, &agent_id) {
             let _ = crate::competence::update_competence(&db, &agent_id, &domain, false, None);
             tracing::info!("Human thumbs-down: competence lowered for agent {} domain '{}'", agent_id, domain);
         }
+        let _ = crate::knowledge::insert_knowledge(
+            &db, &agent_id,
+            &format!("User disapproved output in task {}. Avoid this approach in future.", task_id),
+            "correction", Some(&task_id),
+        );
+    } else if rating > 0 {
+        let _ = crate::knowledge::insert_knowledge(
+            &db, &agent_id,
+            &format!("User approved output in task {}. This approach worked well.", task_id),
+            "praise", Some(&task_id),
+        );
     }
     Ok(())
 }

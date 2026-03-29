@@ -137,6 +137,13 @@ async fn run_verification(
                 &db, agent_id,
                 &format!("Self-verify: BAD in {}. Reason: {}", domain_label, reason),
             );
+
+            // Set urgency flag — idle thinker will react within 60s
+            let urgent_key = format!("urgent_think_{}", agent_id);
+            let _ = db.execute(
+                "INSERT INTO config_store (key, value) VALUES (?1, '1') ON CONFLICT(key) DO UPDATE SET value = '1'",
+                rusqlite::params![urgent_key],
+            );
         }
     } else {
         tracing::info!("Self-verification: agent {} rated task {} as GOOD", agent_id, task_id);
