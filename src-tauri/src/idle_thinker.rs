@@ -48,7 +48,18 @@ pub async fn run_idle_thinker(state: Arc<AppState>) {
                 urgent
             };
 
-            if !is_urgent {
+            let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+
+            // Urgent and regular cycles have separate daily budgets
+            let today_key;
+            if is_urgent {
+                today_key = format!("urgent_cycles_{}_{}", agent.id, today);
+                let urgent_count = {
+                    let db = state.db.lock().await;
+                    get_config_counter(&db, &today_key)
+                };
+                if urgent_count >= 5 { continue; } // urgent budget: 5/day
+            } else {
                 // Normal path: check if agent has been idle long enough
                 let idle_duration = chrono::Utc::now()
                     .signed_duration_since(
@@ -56,16 +67,24 @@ pub async fn run_idle_thinker(state: Arc<AppState>) {
                             .unwrap_or_else(|_| chrono::Utc::now().into())
                     );
                 if idle_duration.num_minutes() < idle_minutes as i64 { continue; }
+
+                today_key = format!("idle_cycles_{}_{}", agent.id, today);
+                let cycle_count = {
+                    let db = state.db.lock().await;
+                    get_config_counter(&db, &today_key)
+                };
+                if cycle_count >= max_daily_cycles as i64 { continue; } // regular budget: 10/day
             }
 
-            // Check daily cycle count
-            let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-            let today_key = format!("idle_cycles_{}_{}", agent.id, today);
-            let cycle_count = {
+            // Budget check: skip if daily background token budget exceeded
+            {
                 let db = state.db.lock().await;
-                get_config_counter(&db, &today_key)
-            };
-            if cycle_count >= max_daily_cycles as i64 { continue; }
+                let budget = state.config.read().await.cost.daily_background_token_budget;
+                if !crate::token_usage::has_budget_remaining(&db, &agent.id, 400, budget).unwrap_or(false) {
+                    tracing::info!("Budget exceeded, skipping idle think for agent {}", agent.id);
+                    continue;
+                }
+            }
 
             // Get provider
             let provider = {
@@ -89,8 +108,8 @@ pub async fn run_idle_thinker(state: Arc<AppState>) {
             };
             // DB lock released here!
 
-            // Get task patterns, trajectory, and top curiosity
-            let (patterns_text, trajectory_text, curiosity_text) = {
+            // Get task patterns, trajectory, top curiosity, and latest journal
+            let (patterns_text, trajectory_text, curiosity_text, journal_text) = {
                 let db = state.db.lock().await;
                 let patterns = crate::task_patterns::get_strong_patterns(&db, &agent.id).unwrap_or_default();
                 let pat = crate::task_patterns::format_patterns_for_prompt(&patterns);
@@ -101,7 +120,10 @@ pub async fn run_idle_thinker(state: Arc<AppState>) {
                 } else {
                     String::new()
                 };
-                (pat, traj, cur)
+                let journal = crate::journal::get_latest_journal(&db, &agent.id).ok().flatten()
+                    .map(|j| format!("\nYour last journal ({}):\n{}", j.date, j.content))
+                    .unwrap_or_default();
+                (pat, traj, cur, journal)
             };
 
             // Build thinking prompt
@@ -196,7 +218,7 @@ One action only. Make it count."#,
                 notif_budget,
             );
 
-            // Append trajectory, patterns, and top curiosity
+            // Append trajectory, patterns, top curiosity, and journal
             let mut prompt = prompt;
             if !trajectory_text.is_empty() {
                 prompt = format!("{}\n\nYour growth story:\n{}", prompt, trajectory_text);
@@ -206,6 +228,9 @@ One action only. Make it count."#,
             }
             if !curiosity_text.is_empty() {
                 prompt = format!("{}{}", prompt, curiosity_text);
+            }
+            if !journal_text.is_empty() {
+                prompt = format!("{}{}", prompt, journal_text);
             }
 
             // Make LLM call (no DB lock held!)

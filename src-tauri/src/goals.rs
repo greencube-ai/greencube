@@ -106,6 +106,16 @@ async fn generate_goals(
     let slots_available = MAX_ACTIVE_GOALS - current_active;
     if slots_available <= 0 { return Ok(()); }
 
+    // Budget check
+    {
+        let db = state.db.lock().await;
+        let budget = state.config.read().await.cost.daily_background_token_budget;
+        if !crate::token_usage::has_budget_remaining(&db, agent_id, 300, budget)? {
+            tracing::info!("Budget exceeded, skipping goal generation for agent {}", agent_id);
+            return Ok(());
+        }
+    }
+
     let (agent, knowledge_entries, active_goals) = {
         let db = state.db.lock().await;
         let agent = crate::identity::registry::get_agent(&db, agent_id)?

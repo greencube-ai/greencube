@@ -35,6 +35,16 @@ async fn run_verification(
     task_id: &str,
     domain: Option<&str>,
 ) -> anyhow::Result<()> {
+    // Budget check
+    {
+        let db = state.db.lock().await;
+        let budget = state.config.read().await.cost.daily_background_token_budget;
+        if !crate::token_usage::has_budget_remaining(&db, agent_id, 100, budget)? {
+            tracing::info!("Budget exceeded, skipping self-verify for agent {}", agent_id);
+            return Ok(());
+        }
+    }
+
     // Build condensed conversation for verification
     let mut verify_messages: Vec<serde_json::Value> = messages.iter()
         .filter(|m| {

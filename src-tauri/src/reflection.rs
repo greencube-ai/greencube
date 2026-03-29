@@ -51,6 +51,22 @@ async fn run_reflection(
     messages: &[serde_json::Value],
     task_id: &str,
 ) -> anyhow::Result<()> {
+    // Budget check: skip if daily background token budget exceeded
+    {
+        let db = state.db.lock().await;
+        let budget = state.config.read().await.cost.daily_background_token_budget;
+        if !crate::token_usage::has_budget_remaining(&db, agent_id, 500, budget)? {
+            tracing::info!("Budget exceeded, skipping reflection for agent {}", agent_id);
+            let _ = crate::permissions::audit::log_action(&db, &crate::permissions::audit::AuditEntry {
+                id: uuid::Uuid::new_v4().to_string(), agent_id: agent_id.into(),
+                created_at: chrono::Utc::now().to_rfc3339(), action_type: "budget_skip".into(),
+                action_detail: "Skipped reflection: daily background token budget exceeded".into(),
+                permission_result: "denied".into(), result: None, duration_ms: None, cost_cents: 0, error: None,
+            });
+            return Ok(());
+        }
+    }
+
     // Build a condensed summary of the conversation (limit to avoid huge prompts)
     let mut summary_messages: Vec<serde_json::Value> = messages.iter()
         .filter(|m| {
@@ -132,13 +148,8 @@ async fn run_reflection(
         let _ = crate::context::append_context(&db, agent_id, ctx);
     }
 
-    // Write reflection summary to scratchpad — feeds the idle thinker
-    let reflection_summary = format!(
-        "Last reflection: {} entries extracted. Domain: {}.",
-        knowledge_entries.len(),
-        domain.as_deref().unwrap_or("general")
-    );
-    let _ = crate::context::append_context(&db, agent_id, &reflection_summary);
+    // Only write actionable content to scratchpad (not generic summaries)
+    // The [context] tag from reflection already writes genuinely useful notes above
 
     // Compact scratchpad if it's getting long — dedup and smart truncation
     let ctx_len = crate::context::get_context(&db, agent_id).map(|c| c.len()).unwrap_or(0);

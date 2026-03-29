@@ -18,6 +18,16 @@ pub fn maybe_regenerate(state: Arc<AppState>, agent_id: String, provider: Provid
 }
 
 async fn regenerate_profile(state: &AppState, agent_id: &str, provider: &Provider) -> anyhow::Result<()> {
+    // Budget check
+    {
+        let db = state.db.lock().await;
+        let budget = state.config.read().await.cost.daily_background_token_budget;
+        if !crate::token_usage::has_budget_remaining(&db, agent_id, 200, budget)? {
+            tracing::info!("Budget exceeded, skipping profile regen for agent {}", agent_id);
+            return Ok(());
+        }
+    }
+
     // Gather agent data
     let (agent, knowledge_entries, context, trajectory) = {
         let db = state.db.lock().await;

@@ -52,9 +52,51 @@ pub fn compact_context(conn: &Connection, agent_id: &str) -> anyhow::Result<()> 
     set_context(conn, agent_id, &deduped.join("\n"))
 }
 
-/// Append to agent's working context (for reflection auto-updates).
+/// Generic reflection summary patterns that add no value to the scratchpad.
+const JUNK_PATTERNS: &[&str] = &[
+    "last reflection:",
+    "entries extracted",
+    "domain: general",
+    "context updated",
+    "context unchanged",
+];
+
+/// Append to agent's working context, but only if the content is genuinely new.
+/// Skips generic reflection summaries and lines that are 80%+ similar to existing lines.
 pub fn append_context(conn: &Connection, agent_id: &str, text: &str) -> anyhow::Result<()> {
+    let lower = text.to_lowercase();
+
+    // Skip generic/junk lines
+    if JUNK_PATTERNS.iter().any(|p| lower.contains(p)) {
+        return Ok(());
+    }
+
     let current = get_context(conn, agent_id)?;
+
+    // Check if a similar line already exists (80%+ word overlap = skip)
+    if !current.is_empty() {
+        let new_words: std::collections::HashSet<&str> = text.split_whitespace()
+            .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
+            .filter(|w| w.len() > 2)
+            .collect();
+
+        if !new_words.is_empty() {
+            for existing_line in current.lines() {
+                let existing_words: std::collections::HashSet<&str> = existing_line.split_whitespace()
+                    .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
+                    .filter(|w| w.len() > 2)
+                    .collect();
+                if existing_words.is_empty() { continue; }
+
+                let overlap = new_words.intersection(&existing_words).count();
+                let max_len = new_words.len().max(existing_words.len());
+                if max_len > 0 && (overlap as f64 / max_len as f64) >= 0.8 {
+                    return Ok(()); // too similar, skip
+                }
+            }
+        }
+    }
+
     let new_content = if current.is_empty() {
         text.to_string()
     } else {
@@ -111,8 +153,31 @@ mod tests {
     fn test_append_context() {
         let conn = init_memory_database().expect("init");
         let agent = create_agent(&conn, "Bot", "", &["shell".into()]).expect("create");
-        set_context(&conn, &agent.id, "Line 1").expect("set");
-        append_context(&conn, &agent.id, "Line 2").expect("append");
-        assert_eq!(get_context(&conn, &agent.id).expect("get"), "Line 1\nLine 2");
+        set_context(&conn, &agent.id, "Working on payment integration").expect("set");
+        append_context(&conn, &agent.id, "Self-verify: BAD in css — incomplete auth handling").expect("append");
+        let ctx = get_context(&conn, &agent.id).expect("get");
+        assert!(ctx.contains("payment integration"));
+        assert!(ctx.contains("Self-verify: BAD"));
+    }
+
+    #[test]
+    fn test_append_skips_similar() {
+        let conn = init_memory_database().expect("init");
+        let agent = create_agent(&conn, "Bot", "", &["shell".into()]).expect("create");
+        set_context(&conn, &agent.id, "Self-verify: BAD in css — incomplete auth handling").expect("set");
+        // Same content, should be skipped
+        append_context(&conn, &agent.id, "Self-verify: BAD in css — incomplete auth handling").expect("append");
+        let ctx = get_context(&conn, &agent.id).expect("get");
+        assert_eq!(ctx.matches("Self-verify").count(), 1); // only one occurrence
+    }
+
+    #[test]
+    fn test_append_skips_junk() {
+        let conn = init_memory_database().expect("init");
+        let agent = create_agent(&conn, "Bot", "", &["shell".into()]).expect("create");
+        set_context(&conn, &agent.id, "Working on auth").expect("set");
+        append_context(&conn, &agent.id, "Last reflection: 3 entries extracted. Domain: python.").expect("append");
+        let ctx = get_context(&conn, &agent.id).expect("get");
+        assert!(!ctx.contains("entries extracted")); // junk was filtered
     }
 }
