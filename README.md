@@ -31,6 +31,8 @@ turn it on in settings. your agent starts:
 - sending you notifications when it notices something important
 - spawning specialist children when it's struggling in a domain
 
+creature behaviors like mood shifts, curiosity exploration, and specialist spawning emerge over days of real use. the more you use it, the more alive it gets.
+
 ## works with
 
 openclaw / langchain / crewai / anything openai compatible
