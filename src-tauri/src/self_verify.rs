@@ -94,6 +94,14 @@ async fn run_verification(
     }
 
     let body: serde_json::Value = response.json().await?;
+
+    // Record token usage for budget tracking
+    let tokens_used = body["usage"]["total_tokens"].as_i64().unwrap_or(100);
+    {
+        let db = state.db.lock().await;
+        let _ = crate::token_usage::record_usage(&db, agent_id, "self_verify", tokens_used);
+    }
+
     let content = body["choices"][0]["message"]["content"]
         .as_str()
         .unwrap_or("good");

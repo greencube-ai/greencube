@@ -174,6 +174,14 @@ If nothing comes to mind, respond: NONE"#,
     if !response.status().is_success() { anyhow::bail!("Goal generation LLM call failed"); }
 
     let body: serde_json::Value = response.json().await?;
+
+    // Record token usage
+    let tokens_used = body["usage"]["total_tokens"].as_i64().unwrap_or(300);
+    {
+        let db = state.db.lock().await;
+        let _ = crate::token_usage::record_usage(&db, agent_id, "goals", tokens_used);
+    }
+
     let content = body["choices"][0]["message"]["content"].as_str().unwrap_or("NONE");
 
     if content.trim() == "NONE" { return Ok(()); }

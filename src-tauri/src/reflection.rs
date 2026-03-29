@@ -121,6 +121,14 @@ async fn run_reflection(
     }
 
     let body: serde_json::Value = response.json().await?;
+
+    // Record token usage for budget tracking
+    let tokens_used = body["usage"]["total_tokens"].as_i64().unwrap_or(500);
+    {
+        let db = state.db.lock().await;
+        let _ = crate::token_usage::record_usage(&db, agent_id, "reflection", tokens_used);
+    }
+
     let content = body["choices"][0]["message"]["content"]
         .as_str()
         .unwrap_or("NONE");

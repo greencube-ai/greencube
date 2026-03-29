@@ -114,6 +114,14 @@ Describe what it's good at, patterns in its work, and any preferences. Be concis
     }
 
     let body: serde_json::Value = response.json().await?;
+
+    // Record token usage
+    let tokens_used = body["usage"]["total_tokens"].as_i64().unwrap_or(200);
+    {
+        let db = state.db.lock().await;
+        let _ = crate::token_usage::record_usage(&db, agent_id, "profile", tokens_used);
+    }
+
     let profile = body["choices"][0]["message"]["content"]
         .as_str()
         .unwrap_or("")

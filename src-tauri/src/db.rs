@@ -600,7 +600,7 @@ fn migrate_v8_to_v9(conn: &Connection) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// v9 → v10: Add success_when_used + stale flag to knowledge for memory decay
+/// v9 → v10: Memory decay + fix social drive threshold + enable knowledge injection
 fn migrate_v9_to_v10(conn: &Connection) -> anyhow::Result<()> {
     let has_col: bool = conn.prepare("SELECT success_when_used FROM knowledge LIMIT 0").is_ok();
     if !has_col {
@@ -610,8 +610,15 @@ fn migrate_v9_to_v10(conn: &Connection) -> anyhow::Result<()> {
     if !has_stale {
         conn.execute_batch("ALTER TABLE knowledge ADD COLUMN stale INTEGER NOT NULL DEFAULT 0;")?;
     }
+
+    // Fix social drive threshold for existing agents (was 1.5, should be 0.8)
+    conn.execute(
+        "UPDATE drives SET threshold = 0.8 WHERE drive_name = 'social' AND threshold > 0.8",
+        [],
+    )?;
+
     set_version(conn, 10)?;
-    tracing::info!("Database migrated to v10: memory decay (success_when_used + stale)");
+    tracing::info!("Database migrated to v10: memory decay, social drive fix, knowledge enabled");
     Ok(())
 }
 

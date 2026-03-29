@@ -263,6 +263,13 @@ One action only. Make it count."#,
                 Err(_) => continue,
             };
 
+            // Record token usage for budget tracking
+            let tokens_used = body["usage"]["total_tokens"].as_i64().unwrap_or(400);
+            {
+                let db = state.db.lock().await;
+                let _ = crate::token_usage::record_usage(&db, &agent.id, "idle", tokens_used);
+            }
+
             let content = body["choices"][0]["message"]["content"].as_str().unwrap_or("IDLE");
             if content.trim() == "IDLE" {
                 // Still count the cycle

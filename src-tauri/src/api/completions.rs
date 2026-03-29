@@ -282,6 +282,31 @@ pub async fn chat_completions(
     emit_status(&state, &agent.id, "active");
     emit_refresh(&state);
 
+    // Track relationship with user (use x-user-id header or "default_user")
+    let user_id = headers.get("x-user-id")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("default_user")
+        .to_string();
+    {
+        let db = state.db.lock().await;
+        let _ = crate::relationships::record_interaction(&db, &agent.id, &user_id);
+    }
+
+    // Inject relationship context if enough interactions
+    if let Some(messages) = body["messages"].as_array_mut() {
+        let rel_prompt = {
+            let db = state.db.lock().await;
+            crate::relationships::get_relationship_prompt(&db, &agent.id, &user_id)
+        };
+        if let Some(rel_text) = rel_prompt {
+            if let Some(sys) = messages.iter_mut().find(|m| m["role"] == "system") {
+                if let Some(c) = sys["content"].as_str() {
+                    sys["content"] = serde_json::Value::String(format!("{}\n\n{}", c, rel_text));
+                }
+            }
+        }
+    }
+
     // Inject mood-driven behavior into system prompt
     if let Some(messages) = body["messages"].as_array_mut() {
         let mood = {

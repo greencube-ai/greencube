@@ -189,6 +189,14 @@ Max 300 words."#,
     }
 
     let body: serde_json::Value = response.json().await?;
+
+    // Record token usage
+    let tokens_used = body["usage"]["total_tokens"].as_i64().unwrap_or(600);
+    {
+        let db = state.db.lock().await;
+        let _ = crate::token_usage::record_usage(&db, agent_id, "journal", tokens_used);
+    }
+
     let content = body["choices"][0]["message"]["content"].as_str().unwrap_or("").to_string();
 
     if content.is_empty() { return Ok(()); }

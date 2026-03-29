@@ -222,6 +222,10 @@ pub async fn rate_response(agent_id: String, task_id: String, rating: i32, state
             "praise", Some(&task_id),
         );
     }
+
+    // Update relationship signals
+    let _ = crate::relationships::record_signal(&db, &agent_id, "default_user", rating > 0);
+
     Ok(())
 }
 

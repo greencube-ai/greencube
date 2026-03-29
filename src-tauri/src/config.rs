@@ -76,7 +76,7 @@ impl Default for IdleConfig {
     }
 }
 
-fn default_memory_mode() -> String { "off".into() }
+fn default_memory_mode() -> String { "keyword".into() }
 fn default_true() -> bool { true }
 
 impl Default for AppConfig {
@@ -86,7 +86,7 @@ impl Default for AppConfig {
                 api_base_url: "https://api.openai.com/v1".into(),
                 api_key: String::new(),
                 default_model: "gpt-4o".into(),
-                memory_mode: "off".into(),
+                memory_mode: "keyword".into(),
                 self_reflection_enabled: true,
             },
             server: ServerConfig {
