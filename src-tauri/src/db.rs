@@ -72,6 +72,9 @@ fn run_migrations(conn: &Connection) -> anyhow::Result<()> {
     if version < 9 {
         migrate_v8_to_v9(conn)?;
     }
+    if version < 10 {
+        migrate_v9_to_v10(conn)?;
+    }
     Ok(())
 }
 
@@ -597,6 +600,21 @@ fn migrate_v8_to_v9(conn: &Connection) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// v9 → v10: Add success_when_used + stale flag to knowledge for memory decay
+fn migrate_v9_to_v10(conn: &Connection) -> anyhow::Result<()> {
+    let has_col: bool = conn.prepare("SELECT success_when_used FROM knowledge LIMIT 0").is_ok();
+    if !has_col {
+        conn.execute_batch("ALTER TABLE knowledge ADD COLUMN success_when_used INTEGER NOT NULL DEFAULT 0;")?;
+    }
+    let has_stale: bool = conn.prepare("SELECT stale FROM knowledge LIMIT 0").is_ok();
+    if !has_stale {
+        conn.execute_batch("ALTER TABLE knowledge ADD COLUMN stale INTEGER NOT NULL DEFAULT 0;")?;
+    }
+    set_version(conn, 10)?;
+    tracing::info!("Database migrated to v10: memory decay (success_when_used + stale)");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -649,7 +667,7 @@ mod tests {
     fn test_schema_version_is_8() {
         let conn = init_memory_database().expect("init");
         let version = get_version(&conn).expect("version");
-        assert_eq!(version, 9);
+        assert_eq!(version, 10);
     }
 
     #[test]
@@ -665,7 +683,7 @@ mod tests {
         run_migrations(&conn).expect("first");
         // Running again should be a no-op (version is already 3)
         run_migrations(&conn).expect("second should not fail");
-        assert_eq!(get_version(&conn).expect("v"), 9);
+        assert_eq!(get_version(&conn).expect("v"), 10);
     }
 
     #[test]

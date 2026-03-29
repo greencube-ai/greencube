@@ -93,7 +93,7 @@ pub fn update_project_context(conn: &Connection, agent_id: &str, project_name: &
 /// Get knowledge entries tagged with a specific project.
 pub fn get_project_knowledge(conn: &Connection, project_id: &str) -> anyhow::Result<Vec<crate::knowledge::KnowledgeEntry>> {
     let mut stmt = conn.prepare(
-        "SELECT id, agent_id, content, source_task_id, category, confidence, created_at, last_used_at, use_count, COALESCE(valence, 0)
+        "SELECT id, agent_id, content, source_task_id, category, confidence, created_at, last_used_at, use_count, COALESCE(valence, 0), COALESCE(success_when_used, 0), COALESCE(stale, 0)
          FROM knowledge WHERE project_id = ?1 ORDER BY created_at DESC LIMIT 10"
     )?;
     let entries = stmt.query_map(params![project_id], |row| {
@@ -101,7 +101,8 @@ pub fn get_project_knowledge(conn: &Connection, project_id: &str) -> anyhow::Res
             id: row.get(0)?, agent_id: row.get(1)?, content: row.get(2)?,
             source_task_id: row.get(3)?, category: row.get(4)?, confidence: row.get(5)?,
             created_at: row.get(6)?, last_used_at: row.get(7)?, use_count: row.get(8)?,
-            valence: row.get(9)?,
+            valence: row.get(9)?, success_when_used: row.get::<_, i64>(10).unwrap_or(0),
+            stale: row.get::<_, i64>(11).unwrap_or(0) != 0,
         })
     })?.collect::<Result<Vec<_>, _>>()?;
     Ok(entries)

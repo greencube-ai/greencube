@@ -7,12 +7,14 @@ pub struct KnowledgeEntry {
     pub agent_id: String,
     pub content: String,
     pub source_task_id: Option<String>,
-    pub category: String, // fact, preference, warning, skill, synthesis
+    pub category: String, // fact, preference, warning, skill, synthesis, correction, praise
     pub confidence: f64,
     pub created_at: String,
     pub last_used_at: Option<String>,
     pub use_count: i64,
     pub valence: i32, // -2 to +2: emotional memory (-2=very frustrating, 0=neutral, +2=excellent)
+    pub success_when_used: i64, // bumped when task after injection gets self-verify "good"
+    pub stale: bool, // true = relevance score < 0.1, still stored but not injected
 }
 
 pub fn insert_knowledge(
@@ -46,23 +48,30 @@ pub fn insert_knowledge_with_valence(
         id, agent_id: agent_id.into(), content: content.into(),
         source_task_id: source_task_id.map(|s| s.into()), category: category.into(),
         confidence: 1.0, created_at: now, last_used_at: None, use_count: 0, valence,
+        success_when_used: 0, stale: false,
     })
 }
 
 pub fn list_knowledge(conn: &Connection, agent_id: &str, limit: i64) -> anyhow::Result<Vec<KnowledgeEntry>> {
     let mut stmt = conn.prepare(
-        "SELECT id, agent_id, content, source_task_id, category, confidence, created_at, last_used_at, use_count, COALESCE(valence, 0)
+        "SELECT id, agent_id, content, source_task_id, category, confidence, created_at, last_used_at, use_count, COALESCE(valence, 0), COALESCE(success_when_used, 0), COALESCE(stale, 0)
          FROM knowledge WHERE agent_id = ?1 ORDER BY created_at DESC LIMIT ?2"
     )?;
     let entries = stmt.query_map(params![agent_id, limit], |row| {
-        Ok(KnowledgeEntry {
-            id: row.get(0)?, agent_id: row.get(1)?, content: row.get(2)?,
-            source_task_id: row.get(3)?, category: row.get(4)?, confidence: row.get(5)?,
-            created_at: row.get(6)?, last_used_at: row.get(7)?, use_count: row.get(8)?,
-            valence: row.get(9)?,
-        })
+        Ok(knowledge_from_row(row, 0)?)
     })?.collect::<Result<Vec<_>, _>>()?;
     Ok(entries)
+}
+
+fn knowledge_from_row(row: &rusqlite::Row, offset: usize) -> rusqlite::Result<KnowledgeEntry> {
+    Ok(KnowledgeEntry {
+        id: row.get(offset)?, agent_id: row.get(offset + 1)?, content: row.get(offset + 2)?,
+        source_task_id: row.get(offset + 3)?, category: row.get(offset + 4)?, confidence: row.get(offset + 5)?,
+        created_at: row.get(offset + 6)?, last_used_at: row.get(offset + 7)?, use_count: row.get(offset + 8)?,
+        valence: row.get(offset + 9)?,
+        success_when_used: row.get(offset + 10).unwrap_or(0),
+        stale: row.get::<_, i64>(offset + 11).unwrap_or(0) != 0,
+    })
 }
 
 /// Smart recall: try semantic similarity via Ollama, fall back to keyword matching.
@@ -157,8 +166,8 @@ fn cosine_similarity(a: &[f64], b: &[f64]) -> f64 {
     dot / (mag_a * mag_b)
 }
 
-/// Recall relevant knowledge using keyword matching (fallback when Ollama unavailable).
-/// Returns max `limit` entries (capped at 10 for injection).
+/// Recall relevant knowledge using keyword matching + relevance scoring.
+/// Filters out stale entries (score < 0.2). Returns max `limit` entries (capped at 10).
 pub fn recall_relevant(
     conn: &Connection,
     agent_id: &str,
@@ -188,40 +197,106 @@ pub fn recall_relevant(
     }
 
     let score_expr = conditions.join(" + ");
-    let capped_limit = limit.min(10); // Max 10 for injection
 
+    // Fetch more than needed so we can re-rank by relevance score
     let sql = format!(
-        "SELECT id, agent_id, content, source_task_id, category, confidence, created_at, last_used_at, use_count, COALESCE(valence, 0),
-                ({score}) as relevance
+        "SELECT id, agent_id, content, source_task_id, category, confidence, created_at, last_used_at, use_count, COALESCE(valence, 0), COALESCE(success_when_used, 0), COALESCE(stale, 0)
          FROM knowledge
-         WHERE agent_id = ?1 AND ({score}) > 0
-         ORDER BY relevance DESC, created_at DESC
-         LIMIT {limit}",
+         WHERE agent_id = ?1 AND ({score}) > 0 AND COALESCE(stale, 0) = 0
+         ORDER BY ({score}) DESC, created_at DESC
+         LIMIT 30",
         score = score_expr,
-        limit = capped_limit
     );
 
     let mut stmt = conn.prepare(&sql)?;
     let params_refs: Vec<&dyn rusqlite::types::ToSql> = all_params.iter().map(|p| p.as_ref()).collect();
     let entries = stmt.query_map(params_refs.as_slice(), |row| {
-        Ok(KnowledgeEntry {
-            id: row.get(0)?, agent_id: row.get(1)?, content: row.get(2)?,
-            source_task_id: row.get(3)?, category: row.get(4)?, confidence: row.get(5)?,
-            created_at: row.get(6)?, last_used_at: row.get(7)?, use_count: row.get(8)?,
-            valence: row.get(9)?,
-        })
+        Ok(knowledge_from_row(row, 0)?)
     })?.collect::<Result<Vec<_>, _>>()?;
 
+    // Score and rank by memory decay relevance
+    let now = chrono::Utc::now();
+    let mut scored: Vec<(f64, KnowledgeEntry)> = entries.into_iter().map(|e| {
+        let score = compute_relevance_score(&e, &now);
+        (score, e)
+    }).filter(|(score, _)| *score >= 0.2).collect();
+
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    let capped_limit = limit.min(10) as usize;
+    let results: Vec<KnowledgeEntry> = scored.into_iter().take(capped_limit).map(|(_, e)| e).collect();
+
     // Update use_count and last_used_at for returned entries
-    let now = chrono::Utc::now().to_rfc3339();
-    for entry in &entries {
+    let now_str = now.to_rfc3339();
+    for entry in &results {
         let _ = conn.execute(
             "UPDATE knowledge SET use_count = use_count + 1, last_used_at = ?1 WHERE id = ?2",
-            params![now, entry.id],
+            params![now_str, entry.id],
         );
     }
 
-    Ok(entries)
+    Ok(results)
+}
+
+/// Memory decay relevance score.
+/// Higher = more valuable knowledge. Gold knowledge (high success, rarely used) scores well.
+/// Noise (frequently stored, never helpful) scores low.
+/// New entries (use_count == 0) always pass — they haven't had a chance to prove themselves.
+fn compute_relevance_score(entry: &KnowledgeEntry, now: &chrono::DateTime<chrono::Utc>) -> f64 {
+    // New entries always get injected until they've been used at least once
+    if entry.use_count == 0 {
+        return 1.0;
+    }
+
+    // Recency: 1.0 if used today, decays 0.05 per day unused
+    let recency = if let Some(ref last_used) = entry.last_used_at {
+        if let Ok(used_at) = chrono::DateTime::parse_from_rfc3339(last_used) {
+            let days_since = now.signed_duration_since(used_at).num_days().max(0) as f64;
+            (1.0 - days_since * 0.05).max(0.0)
+        } else {
+            0.3
+        }
+    } else {
+        0.3
+    };
+
+    let use_score = (entry.use_count as f64).min(10.0) / 10.0; // normalize 0-1, cap at 10
+    let success_score = (entry.success_when_used as f64).min(10.0) / 10.0; // normalize 0-1, cap at 10
+
+    (use_score * 0.3) + (success_score * 0.5) + (recency * 0.2)
+}
+
+/// Bump success_when_used for all knowledge entries that were recently injected for this agent.
+/// Called after self-verify rates "good".
+pub fn bump_success_for_recent(conn: &Connection, agent_id: &str) -> anyhow::Result<()> {
+    // Bump entries used in the last hour (recently injected into a task)
+    let cutoff = (chrono::Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
+    conn.execute(
+        "UPDATE knowledge SET success_when_used = success_when_used + 1 WHERE agent_id = ?1 AND last_used_at > ?2",
+        params![agent_id, cutoff],
+    )?;
+    Ok(())
+}
+
+/// Mark entries with relevance score < 0.1 as stale. Never deleted, just not injected.
+pub fn mark_stale_entries(conn: &Connection, agent_id: &str) -> anyhow::Result<i64> {
+    let all = list_knowledge(conn, agent_id, 500)?;
+    let now = chrono::Utc::now();
+    let mut marked = 0i64;
+    for entry in &all {
+        let score = compute_relevance_score(entry, &now);
+        if score < 0.1 && !entry.stale {
+            conn.execute("UPDATE knowledge SET stale = 1 WHERE id = ?1", params![entry.id])?;
+            marked += 1;
+        } else if score >= 0.2 && entry.stale {
+            // Revive: if score recovered (got used again), unmark stale
+            conn.execute("UPDATE knowledge SET stale = 0 WHERE id = ?1", params![entry.id])?;
+        }
+    }
+    if marked > 0 {
+        tracing::info!("Memory decay: marked {} entries as stale for agent {}", marked, agent_id);
+    }
+    Ok(marked)
 }
 
 /// Cross-agent learning: find knowledge from OTHER agents that's relevant to a query.
@@ -257,9 +332,9 @@ pub fn recall_habitat_knowledge(
 
     let score_expr = conditions.join(" + ");
     let sql = format!(
-        "SELECT a.name, k.id, k.agent_id, k.content, k.source_task_id, k.category, k.confidence, k.created_at, k.last_used_at, k.use_count, COALESCE(k.valence, 0)
+        "SELECT a.name, k.id, k.agent_id, k.content, k.source_task_id, k.category, k.confidence, k.created_at, k.last_used_at, k.use_count, COALESCE(k.valence, 0), COALESCE(k.success_when_used, 0), COALESCE(k.stale, 0)
          FROM knowledge k JOIN agents a ON a.id = k.agent_id
-         WHERE k.agent_id != ?1 AND ({}) > 0
+         WHERE k.agent_id != ?1 AND ({}) > 0 AND COALESCE(k.stale, 0) = 0
          ORDER BY ({}) DESC
          LIMIT {}",
         score_expr, score_expr, limit
@@ -270,12 +345,7 @@ pub fn recall_habitat_knowledge(
     let rows = stmt.query_map(params_refs.as_slice(), |row| {
         Ok((
             row.get::<_, String>(0)?,
-            KnowledgeEntry {
-                id: row.get(1)?, agent_id: row.get(2)?, content: row.get(3)?,
-                source_task_id: row.get(4)?, category: row.get(5)?, confidence: row.get(6)?,
-                created_at: row.get(7)?, last_used_at: row.get(8)?, use_count: row.get(9)?,
-                valence: row.get(10)?,
-            }
+            knowledge_from_row(row, 1)?,
         ))
     })?.collect::<Result<Vec<_>, _>>()?;
     Ok(rows)

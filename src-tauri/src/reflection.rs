@@ -146,6 +146,9 @@ async fn run_reflection(
         let _ = crate::context::compact_context(&db, agent_id);
     }
 
+    // Memory decay: mark low-relevance knowledge as stale
+    let _ = knowledge::mark_stale_entries(&db, agent_id);
+
     // Update context cluster for this domain
     if let Some(ref d) = domain {
         let _ = crate::context_clusters::update_cluster(&db, agent_id, d);

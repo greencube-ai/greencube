@@ -147,6 +147,9 @@ async fn run_verification(
         }
     } else {
         tracing::info!("Self-verification: agent {} rated task {} as GOOD", agent_id, task_id);
+        // Reward knowledge that was recently injected — it helped produce a good result
+        let db = state.db.lock().await;
+        let _ = crate::knowledge::bump_success_for_recent(&db, agent_id);
     }
 
     Ok(())
