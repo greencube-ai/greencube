@@ -1,53 +1,51 @@
 # GreenCube
 
-**where AI agents learn from experience**
+your agent learns from every task.
 
-your agent forgets everything between sessions. GreenCube fixes that.
+## install
 
-one env variable. your OpenClaw, LangChain, or CrewAI agent starts extracting knowledge from every task, tracking what it's good at, and reflecting on mistakes. when it keeps failing at something, it creates a specialist to handle it.
+mac / linux:
+```
+curl -sL greencube.world/install.sh | sh
+```
 
-## quick start
+windows (powershell):
+```
+irm greencube.world/install.ps1 | iex
+```
 
-1. download greencube from [greencube.world](https://greencube.world)
-2. add one line before running your agent:
-   ```
-   export OPENAI_API_BASE=http://localhost:9000/v1
-   ```
-3. run your agent. greencube handles the rest.
+## connect your agent
+
+add one line before running your agent:
+
+```
+export OPENAI_API_BASE=http://localhost:9000/v1
+```
+
+works with openclaw, langchain, crewai, or anything openai compatible.
 
 ## what your agent gets
 
-- **persistent memory** — facts extracted from every task, injected into future tasks
-- **competence tracking** — knows what it's good at (python 91%) and bad at (css 43%)
-- **self-verification** — rates its own output and admits when it's wrong
-- **docker sandbox** — tool calls run in containers, not on your machine
-- **audit trail** — every action logged with timestamps
+- **remembers** — facts from past tasks persist and get injected into future conversations
+- **learns** — extracts structured knowledge from every task automatically
+- **self-checks** — reviews its own output and flags when it got something wrong
+- **tracks competence** — knows what its good at and where it struggles, per domain
+- **adapts** — changes behavior based on learned preferences
 
-## alive mode (opt-in)
+## how it works
 
-turn it on in settings. your agent starts:
-- reflecting after tasks and extracting structured knowledge
-- thinking between tasks about knowledge gaps
-- sending you notifications when it notices something important
-- spawning specialist children when it's struggling in a domain
+greencube runs a local server on your machine (localhost:9000). your agent talks to greencube instead of directly to openai. greencube forwards the request, but also remembers, learns, and improves your agent behind the scenes. the response comes back unchanged. your agent has no idea anything happened. it just gets smarter.
 
-creature behaviors like mood shifts, curiosity exploration, and specialist spawning emerge over days of real use. the more you use it, the more alive it gets.
+everything stays on your machine. nothing goes to the cloud except the AI model calls themselves.
 
-## works with
+## the numbers
 
-openclaw / langchain / crewai / anything openai compatible
+- 143 tests passing
+- 45 rust modules
+- works on windows + mac
+- MIT license
+- free forever
 
-## build from source
-
-```
-git clone https://github.com/greencube-ai/greencube
-cd greencube
-npm install
-npm run tauri dev
-```
-
-requires: node 20+, rust 1.77+, docker (optional)
-
-[greencube.world](https://greencube.world) / [github](https://github.com/greencube-ai/greencube)
+[greencube.world](https://greencube.world)
 
 MIT License © 2026 Hector Gras
