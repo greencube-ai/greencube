@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { saveConfig, getConfig, getServerInfo, readOpenclawConfig, configureOpenclaw, restartOpenclaw, minimizeToTray } from '../lib/invoke';
+import { saveConfig, createProvider, getConfig, getServerInfo, readOpenclawConfig, configureOpenclaw, restartOpenclaw } from '../lib/invoke';
 import type { AppConfig } from '../lib/types';
 
 type Mode = 'pick' | 'openclaw' | 'openai' | 'ollama' | 'done';
@@ -17,7 +17,14 @@ export function OnboardingModal() {
   useState(() => { getServerInfo().then(info => setPort(info.port)).catch(() => {}); });
 
   const finishSetup = async (key: string, baseUrl: string, model: string) => {
-    // Save config (this syncs API key to providers table)
+    // Create provider in DB so the proxy can use it
+    try {
+      await createProvider('default', baseUrl, key, model, 'openai');
+    } catch {
+      // Provider might already exist, that's ok
+    }
+
+    // Save config + mark onboarding complete
     const config = state.config ?? await getConfig();
     const updated: AppConfig = {
       ...config,
@@ -25,7 +32,6 @@ export function OnboardingModal() {
       ui: { ...config.ui, onboarding_complete: true },
     };
     await saveConfig(updated);
-    // Don't dispatch SET_CONFIG yet — that would re-render to dashboard before hide
   };
 
   const handleOpenclaw = async () => {
@@ -95,10 +101,6 @@ export function OnboardingModal() {
   };
 
   const handleDone = async () => {
-    // Hide window first, THEN update state — prevents dashboard flash
-    await minimizeToTray();
-    // Small delay to ensure window is hidden before React re-renders
-    await new Promise(r => setTimeout(r, 200));
     window.location.reload();
   };
 
@@ -224,9 +226,9 @@ export function OnboardingModal() {
             <button onClick={handleDone}
               className="px-8 py-2.5 rounded-lg text-black font-semibold hover:brightness-110 transition"
               style={{ backgroundColor: 'var(--accent)' }}>
-              Done — minimize to tray
+              Go to Dashboard
             </button>
-            <p className="text-[10px] text-[var(--text-muted)] mt-3">GreenCube runs silently in the background. Right-click the tray icon anytime.</p>
+            <p className="text-[10px] text-[var(--text-muted)] mt-3">GreenCube runs in the background. Close the window anytime — the proxy stays alive in the system tray.</p>
           </div>
         )}
       </div>
