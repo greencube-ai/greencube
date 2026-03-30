@@ -25,7 +25,8 @@
     },
     "trayIcon": {
       "iconPath": "icons/icon.png",
-      "iconAsTemplate": false
+      "iconAsTemplate": false,
+      "tooltip": "GreenCube running"
     }
   },
   "bundle": {

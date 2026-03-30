@@ -10,7 +10,7 @@ use crate::providers;
 use crate::providers::Provider;
 use crate::state::AppState;
 use std::sync::Arc;
-use tauri::State;
+use tauri::{Manager, State};
 
 type Result<T> = std::result::Result<T, GreenCubeError>;
 
@@ -567,7 +567,9 @@ pub async fn restart_openclaw() -> Result<String> {
 
 /// Minimize the main window to tray
 #[tauri::command]
-pub async fn minimize_to_tray(window: tauri::Window) -> Result<()> {
-    let _ = window.hide();
+pub async fn minimize_to_tray(app: tauri::AppHandle) -> Result<()> {
+    if let Some(window) = app.get_webview_window("main") {
+        window.hide().map_err(|e| GreenCubeError::Internal(format!("failed to hide window: {}", e)))?;
+    }
     Ok(())
 }
