@@ -15,7 +15,7 @@ use crate::state::AppState;
 const MAX_CHILDREN: i64 = 3;
 const MAX_TOTAL_AGENTS: i64 = 10; // SECURITY: Global cap on total agents to prevent runaway spawning
 const MIN_DOMAIN_TASKS: i64 = 5; // 5 tasks in a domain before spawning is considered
-const MAX_COMPETENCE_FOR_SPAWN: f64 = 0.75; // spawn if below 75% — realistic with 1-5 scoring
+const MIN_COMPETENCE_GAP: f64 = 0.20; // spawn when domain is 20+ percentage points below best domain
 const MIN_TOTAL_TASKS: i64 = 10; // 10 total tasks before any spawning
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,7 +114,7 @@ pub async fn execute_spawn(
             anyhow::bail!("Maximum {} specialist agents reached", MAX_CHILDREN);
         }
 
-        // Check competence in domain
+        // Check competence in domain — spawn only when there's a RELATIVE weakness
         let comp_map = competence::get_competence_map(&db, parent_agent_id)?;
         let entry = comp_map.iter().find(|c| c.domain == domain)
             .ok_or_else(|| anyhow::anyhow!("No competence data for domain '{}'", domain))?;
@@ -122,8 +122,22 @@ pub async fn execute_spawn(
         if entry.task_count < MIN_DOMAIN_TASKS {
             anyhow::bail!("Need at least {} tasks in '{}' before spawning (have {})", MIN_DOMAIN_TASKS, domain, entry.task_count);
         }
-        if entry.confidence >= MAX_COMPETENCE_FOR_SPAWN {
-            anyhow::bail!("Competence in '{}' is {}% — too high to need a specialist", domain, (entry.confidence * 100.0) as i64);
+
+        // Find the best domain (with enough tasks) to compare against
+        let best_confidence = comp_map.iter()
+            .filter(|c| c.task_count >= MIN_DOMAIN_TASKS)
+            .map(|c| c.confidence)
+            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .unwrap_or(entry.confidence);
+
+        let gap = best_confidence - entry.confidence;
+        if gap < MIN_COMPETENCE_GAP {
+            anyhow::bail!(
+                "Competence in '{}' is {}% — only {}% below best domain ({}%). Need {}%+ gap to spawn specialist.",
+                domain, (entry.confidence * 100.0) as i64,
+                (gap * 100.0) as i64, (best_confidence * 100.0) as i64,
+                (MIN_COMPETENCE_GAP * 100.0) as i64
+            );
         }
 
         let entry_clone = entry.clone();

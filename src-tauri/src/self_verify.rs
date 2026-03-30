@@ -4,20 +4,17 @@ use crate::competence;
 use crate::providers::Provider;
 use crate::state::AppState;
 
-const VERIFY_PROMPT: &str = r#"You are a strict code reviewer. Grade the assistant's response above on a 1-5 scale.
-
-Be HARSH. Most responses have flaws. A 5 is exceptional — almost nothing deserves it.
+const VERIFY_PROMPT: &str = r#"Grade the assistant's response above on a 1-5 scale based on whether it fully solves what was asked.
 
 [score] N — one sentence justification
 
-Scoring:
-1 = wrong, harmful, or completely off-topic
-2 = partially correct but missing key details, or contains errors
-3 = acceptable but could be better (missing edge cases, verbose, not quite what was asked)
-4 = good, addresses the question well with minor room for improvement
-5 = excellent, complete, accurate, concise — nothing to improve
+5 = perfect, complete solution — nothing missing, nothing wrong
+4 = works but minor gaps — small details missing or could be slightly better
+3 = partially works — missing important pieces, incomplete, or needs significant revision
+2 = mostly wrong or incomplete — fundamental issues
+1 = completely wrong, off-topic, or harmful
 
-Most responses are a 3. Be critical. If unsure between two scores, pick the lower one."#;
+Be honest. Score based on the actual quality of the response, not how hard the task was."#;
 
 /// Run self-verification after a task completes. Spawns as background task.
 pub fn spawn_verification(
