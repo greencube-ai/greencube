@@ -155,3 +155,20 @@ export async function markNotificationRead(id: string): Promise<void> {
 export async function dismissAllNotifications(): Promise<void> {
   return invoke<void>('dismiss_all_notifications');
 }
+
+// OpenClaw integration
+export async function readOpenclawConfig(): Promise<Record<string, unknown>> {
+  return invoke<Record<string, unknown>>('read_openclaw_config');
+}
+
+export async function configureOpenclaw(port: number): Promise<{ model: string; key_found: boolean }> {
+  return invoke<{ model: string; key_found: boolean }>('configure_openclaw', { port });
+}
+
+export async function restartOpenclaw(): Promise<string> {
+  return invoke<string>('restart_openclaw');
+}
+
+export async function minimizeToTray(): Promise<void> {
+  return invoke<void>('minimize_to_tray');
+}

@@ -432,3 +432,142 @@ pub async fn delete_provider(id: String, state: State<'_, Arc<AppState>>) -> Res
     providers::delete_provider(&db, &id)
         .map_err(|e| GreenCubeError::Internal(e.to_string()))
 }
+
+// ─── OpenClaw Integration ──────────────────────────────────────────────────
+
+/// Read and parse ~/.openclaw/openclaw.json (or %USERPROFILE%\.openclaw\openclaw.json on Windows)
+#[tauri::command]
+pub async fn read_openclaw_config() -> Result<serde_json::Value> {
+    let home = dirs::home_dir().ok_or_else(|| GreenCubeError::Internal("cannot find home directory".into()))?;
+    let config_path = home.join(".openclaw").join("openclaw.json");
+    if !config_path.exists() {
+        return Err(GreenCubeError::Internal("not_found".into()));
+    }
+    let content = std::fs::read_to_string(&config_path)
+        .map_err(|e| GreenCubeError::Internal(format!("failed to read openclaw config: {}", e)))?;
+    let json: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| GreenCubeError::Internal(format!("failed to parse openclaw config: {}", e)))?;
+    Ok(json)
+}
+
+/// Auto-configure OpenClaw to route through GreenCube.
+/// Reads existing config, adds greencube provider, sets it as default, writes back.
+#[tauri::command]
+pub async fn configure_openclaw(port: u16, state: State<'_, Arc<AppState>>) -> Result<serde_json::Value> {
+    let home = dirs::home_dir().ok_or_else(|| GreenCubeError::Internal("cannot find home directory".into()))?;
+    let config_path = home.join(".openclaw").join("openclaw.json");
+    if !config_path.exists() {
+        return Err(GreenCubeError::Internal("not_found".into()));
+    }
+
+    let content = std::fs::read_to_string(&config_path)
+        .map_err(|e| GreenCubeError::Internal(format!("failed to read: {}", e)))?;
+    let mut config: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| GreenCubeError::Internal(format!("failed to parse: {}", e)))?;
+
+    // Find existing API key and model from any existing provider
+    let mut found_key = String::new();
+    let mut found_model = "gpt-4o".to_string();
+    if let Some(providers) = config.pointer("/models/providers").and_then(|p| p.as_object()) {
+        for (_name, provider) in providers {
+            if let Some(key) = provider["apiKey"].as_str() {
+                if !key.is_empty() && key != "local" {
+                    found_key = key.to_string();
+                }
+            }
+            if let Some(models) = provider["models"].as_array() {
+                if let Some(first) = models.first() {
+                    if let Some(id) = first["id"].as_str() {
+                        found_model = id.to_string();
+                    }
+                }
+            }
+        }
+    }
+
+    // Build greencube provider entry
+    let gc_provider = serde_json::json!({
+        "baseUrl": format!("http://localhost:{}/v1", port),
+        "apiKey": found_key,
+        "api": "openai-completions",
+        "models": [{
+            "id": found_model,
+            "name": found_model,
+            "reasoning": false,
+            "input": ["text"],
+            "contextWindow": 128000,
+            "maxTokens": 16384
+        }]
+    });
+
+    // Ensure models.providers exists and add greencube
+    if config.pointer("/models/providers").is_none() {
+        config["models"]["providers"] = serde_json::json!({});
+    }
+    config["models"]["providers"]["greencube"] = gc_provider;
+    if config.pointer("/models/mode").is_none() {
+        config["models"]["mode"] = serde_json::json!("merge");
+    }
+
+    // Set default model to greencube
+    let gc_model = format!("greencube/{}", found_model);
+    config["agents"]["defaults"]["model"]["primary"] = serde_json::json!(gc_model);
+    config["agents"]["defaults"]["models"][&gc_model] = serde_json::json!({"alias": found_model});
+
+    // Write back
+    let pretty = serde_json::to_string_pretty(&config)
+        .map_err(|e| GreenCubeError::Internal(format!("failed to serialize: {}", e)))?;
+    std::fs::write(&config_path, &pretty)
+        .map_err(|e| GreenCubeError::Internal(format!("failed to write: {}", e)))?;
+
+    // Also save the found API key to GreenCube's own config
+    if !found_key.is_empty() {
+        let mut gc_config = state.config.write().await;
+        gc_config.llm.api_key = found_key.clone();
+        gc_config.llm.default_model = found_model.clone();
+        let _ = config::save_config(&gc_config);
+        drop(gc_config);
+
+        // Sync to providers table via the existing save_config path
+        let db = state.db.lock().await;
+        // Update default provider or create one
+        if let Ok(Some(p)) = providers::get_default_provider(&db) {
+            let _ = providers::update_provider(&db, &p.id, &p.name, &p.api_base_url, &found_key, &found_model, &p.provider_type);
+        } else {
+            let _ = providers::create_provider(&db, "default", "https://api.openai.com/v1", &found_key, &found_model, "openai");
+        }
+    }
+
+    Ok(serde_json::json!({"model": found_model, "key_found": !found_key.is_empty()}))
+}
+
+/// Run openclaw daemon restart
+#[tauri::command]
+pub async fn restart_openclaw() -> Result<String> {
+    let shell = if cfg!(target_os = "windows") { "cmd" } else { "sh" };
+    let flag = if cfg!(target_os = "windows") { "/C" } else { "-c" };
+    match tokio::process::Command::new(shell)
+        .arg(flag)
+        .arg("openclaw daemon restart")
+        .output()
+        .await
+    {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            if output.status.success() {
+                Ok(format!("{}{}", stdout, stderr))
+            } else {
+                Err(GreenCubeError::Internal(format!("openclaw restart failed: {}{}", stdout, stderr)))
+            }
+        }
+        Err(e) => Err(GreenCubeError::Internal(format!("failed to run openclaw: {}", e))),
+    }
+}
+
+/// Minimize the main window to tray
+#[tauri::command]
+pub async fn minimize_to_tray(window: tauri::Window) -> Result<()> {
+    let _ = window.hide();
+    Ok(())
+}

@@ -146,17 +146,25 @@ fn main() {
 
             use tauri::menu::MenuBuilder;
             let menu = MenuBuilder::new(app)
-                .text("open", "Open GreenCube")
+                .text("brain", "Copy: curl localhost:9000/brain")
                 .separator()
+                .text("open", "Open Dashboard")
                 .text("quit", "Quit")
                 .build()?;
 
+            let brain_handle = handle.clone();
             let _tray = tauri::tray::TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
-                .tooltip("GreenCube — API running")
+                .tooltip("GreenCube running")
                 .on_menu_event(move |_app, event| {
                     match event.id().as_ref() {
+                        "brain" => {
+                            // Copy the brain command to clipboard
+                            if let Some(window) = brain_handle.get_webview_window("main") {
+                                let _ = window.eval("navigator.clipboard.writeText('curl localhost:9000/brain')");
+                            }
+                        }
                         "open" => {
                             if let Some(window) = open_handle.get_webview_window("main") {
                                 let _ = window.show();
@@ -218,6 +226,10 @@ fn main() {
             commands::create_provider,
             commands::update_provider,
             commands::delete_provider,
+            commands::read_openclaw_config,
+            commands::configure_openclaw,
+            commands::restart_openclaw,
+            commands::minimize_to_tray,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

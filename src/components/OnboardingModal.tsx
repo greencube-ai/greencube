@@ -1,74 +1,80 @@
 import { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { saveConfig, createAgent, createProvider, getConfig } from '../lib/invoke';
+import { saveConfig, createAgent, createProvider, getConfig, getServerInfo, readOpenclawConfig, configureOpenclaw, restartOpenclaw, minimizeToTray } from '../lib/invoke';
 import type { AppConfig } from '../lib/types';
 
-const PRESETS = [
-  { name: 'OpenAI', url: 'https://api.openai.com/v1', model: 'gpt-4o', type: 'openai', placeholder: 'sk-...' },
-  { name: 'Ollama (local)', url: 'http://localhost:11434/v1', model: 'llama3', type: 'ollama', placeholder: 'not needed for local' },
-  { name: 'OpenRouter', url: 'https://openrouter.ai/api/v1', model: 'openai/gpt-4o', type: 'openai', placeholder: 'sk-or-...' },
-  { name: 'LM Studio', url: 'http://localhost:1234/v1', model: 'local-model', type: 'openai', placeholder: 'not needed for local' },
-];
-
-const TOOL_INFO: Record<string, { label: string; desc: string }> = {
-  shell: { label: 'Run commands', desc: 'Let your agent run terminal commands on your computer' },
-  read_file: { label: 'Read files', desc: 'Let your agent read files from your disk' },
-  write_file: { label: 'Write files', desc: 'Let your agent create and edit files' },
-  http_get: { label: 'Browse the web', desc: 'Let your agent fetch web pages and APIs' },
-  update_context: { label: 'Take notes', desc: 'Let your agent write down things to remember' },
-};
+type Mode = 'pick' | 'openclaw' | 'openai' | 'ollama' | 'done';
 
 export function OnboardingModal() {
   const { state, dispatch, refreshAgents } = useApp();
-  const [step, setStep] = useState(1);
-  const [preset, setPreset] = useState(0);
+  const [mode, setMode] = useState<Mode>('pick');
   const [apiKey, setApiKey] = useState('');
-  const [createdProviderId, setCreatedProviderId] = useState('');
-  const [agentName, setAgentName] = useState('Dev');
-  const [selectedTools, setSelectedTools] = useState<string[]>(['shell', 'read_file', 'write_file', 'update_context']);
+  const [port, setPort] = useState(9000);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [result, setResult] = useState('');
 
-  const p = PRESETS[preset];
-  const isLocal = p.type === 'ollama' || p.name === 'LM Studio';
+  useState(() => { getServerInfo().then(info => setPort(info.port)).catch(() => {}); });
 
-  const handleContinue = async () => {
-    if (!isLocal && !apiKey.trim()) return;
-    setLoading(true);
-    setError('');
+  const finishSetup = async (key: string, baseUrl: string, model: string) => {
     try {
-      const key = isLocal ? 'local' : apiKey;
-      const provider = await createProvider(p.name, p.url, key, p.model, p.type);
-      setCreatedProviderId(provider.id);
+      // Create provider + agent
+      const provider = await createProvider('default', baseUrl, key, model, 'openai');
+      await createAgent('Dev', 'You are a helpful assistant.', ['shell', 'read_file', 'write_file', 'update_context'], provider.id);
 
+      // Save config
       const config = state.config ?? await getConfig();
       const updated: AppConfig = {
         ...config,
-        llm: { ...config.llm, api_key: key, api_base_url: p.url, default_model: p.model },
+        llm: { ...config.llm, api_key: key, api_base_url: baseUrl, default_model: model },
+        ui: { ...config.ui, onboarding_complete: true },
       };
       await saveConfig(updated);
       dispatch({ type: 'SET_CONFIG', config: updated });
-      setStep(2);
+      await refreshAgents();
     } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleCreateAgent = async () => {
-    if (!agentName.trim()) return;
-    setLoading(true);
-    setError('');
-    try {
-      const agent = await createAgent(agentName, 'You are a helpful assistant.', selectedTools, createdProviderId || undefined);
-      dispatch({ type: 'ADD_AGENT', agent });
+      // Agent might already exist, that's ok
       const config = state.config ?? await getConfig();
       const updated: AppConfig = { ...config, ui: { ...config.ui, onboarding_complete: true } };
       await saveConfig(updated);
       dispatch({ type: 'SET_CONFIG', config: updated });
-      await refreshAgents();
-      setStep(3);
+    }
+  };
+
+  const handleOpenclaw = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      // Check if OpenClaw config exists
+      await readOpenclawConfig();
+
+      // Auto-configure
+      const res = await configureOpenclaw(port);
+      setResult(res.key_found ? `Configured with model ${res.model}. API key copied from your existing provider.` : `Configured with model ${res.model}. You'll need to add an API key to ~/.openclaw/openclaw.json.`);
+
+      // Create GreenCube agent
+      const key = res.key_found ? 'auto-configured' : '';
+      await finishSetup(key, 'https://api.openai.com/v1', res.model);
+      setMode('done');
+    } catch (e: unknown) {
+      const msg = String(e);
+      if (msg.includes('not_found')) {
+        setError('OpenClaw config not found. Install OpenClaw first, then try again.');
+      } else {
+        setError(msg);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOpenai = async () => {
+    if (!apiKey.trim()) return;
+    setLoading(true);
+    setError('');
+    try {
+      await finishSetup(apiKey, 'https://api.openai.com/v1', 'gpt-4o');
+      setMode('done');
     } catch (e) {
       setError(String(e));
     } finally {
@@ -76,16 +82,42 @@ export function OnboardingModal() {
     }
   };
 
-  const toggleTool = (tool: string) => {
-    setSelectedTools((prev) =>
-      prev.includes(tool) ? prev.filter((t) => t !== tool) : [...prev, tool]
-    );
+  const handleOllama = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      await finishSetup('local', 'http://localhost:11434/v1', 'llama3');
+      setMode('done');
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const handleRestartOpenclaw = async () => {
+    setLoading(true);
+    try {
+      await restartOpenclaw();
+      setResult('OpenClaw restarted. You\'re all set.');
+    } catch {
+      setResult('Could not restart automatically. Run: openclaw daemon restart');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDone = async () => {
+    await minimizeToTray();
+  };
+
+  const envLine = `export OPENAI_API_BASE=http://localhost:${port}/v1`;
 
   return (
     <div className="flex items-center justify-center min-h-screen p-4" style={{ backgroundColor: 'var(--bg-primary)' }}>
       <div className="w-full max-w-lg p-8 rounded-xl border" style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border)' }}>
-        {step === 1 && (
+
+        {mode === 'pick' && (
           <div>
             <div className="flex items-center gap-3 mb-3">
               <svg width="28" height="28" viewBox="0 0 512 512">
@@ -94,109 +126,116 @@ export function OnboardingModal() {
               <h1 className="text-2xl font-bold">Welcome to GreenCube</h1>
             </div>
             <p className="text-base text-[var(--text-secondary)] mb-8">
-              Your agent is about to get a memory. First, pick your AI provider.
+              Your agent is about to get a memory. What do you use?
             </p>
 
-            {/* Provider presets */}
-            <label className="block text-xs text-[var(--text-muted)] mb-2 uppercase tracking-wide">Provider</label>
-            <div className="grid grid-cols-2 gap-2 mb-6">
-              {PRESETS.map((pr, i) => (
-                <button key={pr.name} onClick={() => { setPreset(i); setApiKey(''); }}
-                  className={`px-3 py-2.5 rounded-lg text-sm text-left border transition-colors ${
-                    preset === i ? 'text-[var(--accent)] border-[var(--accent)]' : 'text-[var(--text-secondary)] border-[var(--border)] hover:border-[var(--border-hover)]'
-                  }`}
-                  style={preset === i ? { backgroundColor: 'var(--accent-subtle)' } : undefined}>
-                  {pr.name}
-                </button>
-              ))}
-            </div>
+            <div className="space-y-3">
+              <button onClick={() => { setMode('openclaw'); handleOpenclaw(); }}
+                className="w-full p-4 rounded-xl border text-left hover:border-[var(--accent)] transition-colors" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-tertiary)' }}>
+                <div className="text-base font-semibold">OpenClaw</div>
+                <div className="text-xs text-[var(--text-muted)] mt-1">Auto-configures everything. Zero manual steps.</div>
+              </button>
 
-            {/* API Key (skip for local) */}
-            {!isLocal ? (
-              <div className="mb-6">
-                <label className="block text-xs text-[var(--text-muted)] mb-1.5 uppercase tracking-wide">API Key</label>
-                <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
-                  className="w-full font-mono" placeholder={p.placeholder}
-                  onKeyDown={(e) => e.key === 'Enter' && handleContinue()} />
-                <p className="text-[10px] text-[var(--text-muted)] mt-1.5">Your key stays on your computer. Never sent anywhere except {p.name}.</p>
-              </div>
-            ) : (
-              <div className="mb-6 p-3 rounded-lg border text-xs text-[var(--text-muted)]" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-tertiary)' }}>
-                No API key needed. Make sure {p.name} is running on your machine.
-              </div>
-            )}
+              <button onClick={() => setMode('openai')}
+                className="w-full p-4 rounded-xl border text-left hover:border-[var(--accent)] transition-colors" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-tertiary)' }}>
+                <div className="text-base font-semibold">OpenAI / OpenRouter / Other</div>
+                <div className="text-xs text-[var(--text-muted)] mt-1">Just need your API key.</div>
+              </button>
+
+              <button onClick={() => { setMode('ollama'); handleOllama(); }}
+                className="w-full p-4 rounded-xl border text-left hover:border-[var(--accent)] transition-colors" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-tertiary)' }}>
+                <div className="text-base font-semibold">Ollama (local)</div>
+                <div className="text-xs text-[var(--text-muted)] mt-1">No API key needed. Runs on your machine.</div>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {mode === 'openclaw' && !error && (
+          <div className="text-center py-6">
+            <div className="text-[var(--text-muted)] mb-4">{loading ? 'Configuring OpenClaw...' : 'Done.'}</div>
+            {loading && <div className="animate-pulse text-[var(--accent)]">Reading config...</div>}
+          </div>
+        )}
+
+        {mode === 'openclaw' && error && (
+          <div>
+            <h1 className="text-2xl font-bold mb-4">OpenClaw</h1>
+            <div className="p-4 rounded-lg border mb-6 text-sm" style={{ borderColor: 'var(--status-error)', color: 'var(--status-error)', backgroundColor: 'rgba(239,68,68,0.05)' }}>
+              {error}
+            </div>
+            <button onClick={() => { setMode('pick'); setError(''); }}
+              className="text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)]">
+              Back
+            </button>
+          </div>
+        )}
+
+        {mode === 'openai' && (
+          <div>
+            <h1 className="text-2xl font-bold mb-2">API Key</h1>
+            <p className="text-sm text-[var(--text-muted)] mb-6">Your key stays on your computer. Never sent anywhere except OpenAI.</p>
+
+            <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
+              className="w-full mb-6 font-mono" placeholder="sk-..." autoFocus
+              onKeyDown={(e) => e.key === 'Enter' && handleOpenai()} />
 
             {error && <p className="text-xs text-[var(--status-error)] mb-4">{error}</p>}
 
-            <button onClick={handleContinue} disabled={(!isLocal && !apiKey.trim()) || loading}
+            <button onClick={handleOpenai} disabled={!apiKey.trim() || loading}
               className="w-full py-2.5 rounded-lg text-black font-semibold disabled:opacity-50 hover:brightness-110 transition"
               style={{ backgroundColor: 'var(--accent)' }}>
               {loading ? 'Setting up...' : 'Continue'}
             </button>
-          </div>
-        )}
 
-        {step === 2 && (
-          <div>
-            <h1 className="text-2xl font-bold mb-2">Create your agent</h1>
-            <p className="text-base text-[var(--text-secondary)] mb-6">
-              Give it a name. Pick what it's allowed to do.
-            </p>
-
-            <label className="block text-xs text-[var(--text-muted)] mb-1.5 uppercase tracking-wide">Name</label>
-            <input type="text" value={agentName} onChange={(e) => setAgentName(e.target.value)} className="w-full mb-6" placeholder="e.g. Dev" autoFocus />
-
-            <label className="block text-xs text-[var(--text-muted)] mb-2.5 uppercase tracking-wide">Permissions</label>
-            <div className="space-y-2 mb-6">
-              {Object.entries(TOOL_INFO).map(([tool, info]) => (
-                <button key={tool} onClick={() => toggleTool(tool)}
-                  className="w-full flex items-start gap-3 px-3.5 py-2.5 rounded-lg text-left border transition-colors"
-                  style={{
-                    borderColor: selectedTools.includes(tool) ? 'var(--accent)' : 'var(--border)',
-                    backgroundColor: selectedTools.includes(tool) ? 'var(--accent-subtle)' : 'transparent',
-                  }}>
-                  <div className="w-4 h-4 mt-0.5 rounded border flex-shrink-0 flex items-center justify-center text-[10px]"
-                    style={{
-                      borderColor: selectedTools.includes(tool) ? 'var(--accent)' : 'var(--border)',
-                      color: selectedTools.includes(tool) ? 'var(--accent)' : 'transparent',
-                    }}>
-                    {selectedTools.includes(tool) && '\u2713'}
-                  </div>
-                  <div>
-                    <div className="text-sm font-medium" style={{ color: selectedTools.includes(tool) ? 'var(--accent)' : 'var(--text-primary)' }}>{info.label}</div>
-                    <div className="text-xs text-[var(--text-muted)]">{info.desc}</div>
-                  </div>
-                </button>
-              ))}
-            </div>
-
-            {error && <p className="text-xs text-[var(--status-error)] mb-4">{error}</p>}
-
-            <button onClick={handleCreateAgent} disabled={!agentName.trim() || loading}
-              className="w-full py-2.5 rounded-lg text-black font-semibold disabled:opacity-50 hover:brightness-110 transition"
-              style={{ backgroundColor: 'var(--accent)' }}>
-              {loading ? 'Creating...' : 'Create Agent'}
+            <button onClick={() => { setMode('pick'); setError(''); }}
+              className="w-full text-center mt-3 text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)]">
+              Back
             </button>
           </div>
         )}
 
-        {step === 3 && (
+        {mode === 'ollama' && !error && (
           <div className="text-center py-6">
+            <div className="text-[var(--text-muted)]">{loading ? 'Setting up Ollama...' : 'Done.'}</div>
+          </div>
+        )}
+
+        {mode === 'done' && (
+          <div className="text-center py-4">
             <div className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-5" style={{ backgroundColor: 'var(--accent-subtle)' }}>
               <span className="text-2xl" style={{ color: 'var(--accent)' }}>{'\u2713'}</span>
             </div>
             <h1 className="text-2xl font-bold mb-2">You're all set</h1>
-            <p className="text-base text-[var(--text-secondary)] mb-3">Your agent has a memory now. Connect it and start working.</p>
+            {result && <p className="text-sm text-[var(--text-secondary)] mb-4">{result}</p>}
+
+            {/* OpenClaw: show restart button */}
+            {result.includes('Configured') && (
+              <button onClick={handleRestartOpenclaw} disabled={loading}
+                className="px-6 py-2 rounded-lg text-sm font-medium border mb-4" style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
+                {loading ? 'Restarting...' : 'Restart OpenClaw'}
+              </button>
+            )}
+
+            {/* Non-OpenClaw: show env var */}
+            {!result.includes('Configured') && (
+              <div className="rounded-lg border p-3 mb-4 text-left" style={{ backgroundColor: 'var(--bg-tertiary)', borderColor: 'var(--border)' }}>
+                <p className="text-[10px] text-[var(--text-muted)] mb-1">Add this line before running your agent:</p>
+                <code className="text-xs font-mono" style={{ color: 'var(--accent)' }}>{envLine}</code>
+              </div>
+            )}
+
             <div className="rounded-lg border p-3 mb-6 text-left" style={{ backgroundColor: 'var(--bg-tertiary)', borderColor: 'var(--border)' }}>
-              <code className="text-xs font-mono" style={{ color: 'var(--accent)' }}>export OPENAI_API_BASE=http://localhost:9000/v1</code>
-              <p className="text-[10px] text-[var(--text-muted)] mt-1">Add this line before running your agent. Then check on it anytime:</p>
-              <code className="text-[10px] font-mono text-[var(--text-muted)]">curl localhost:9000/brain</code>
+              <p className="text-[10px] text-[var(--text-muted)] mb-1">Check on your agent anytime:</p>
+              <code className="text-xs font-mono text-[var(--text-muted)]">curl localhost:{port}/brain</code>
             </div>
-            <button onClick={() => window.location.reload()}
+
+            <button onClick={handleDone}
               className="px-8 py-2.5 rounded-lg text-black font-semibold hover:brightness-110 transition"
               style={{ backgroundColor: 'var(--accent)' }}>
-              Go to Dashboard
+              Done — minimize to tray
             </button>
+            <p className="text-[10px] text-[var(--text-muted)] mt-3">GreenCube runs silently in the background. Right-click the tray icon anytime.</p>
           </div>
         )}
       </div>
