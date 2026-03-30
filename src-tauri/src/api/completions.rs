@@ -332,9 +332,14 @@ pub async fn chat_completions(
             .take(5)
             .map(|k| format!("- {}", k.content))
             .collect();
-        let corrections: Vec<String> = all_knowledge.iter()
+        let correction_entries: Vec<_> = all_knowledge.iter()
             .filter(|k| k.category == "correction")
             .take(3)
+            .collect();
+        if !correction_entries.is_empty() {
+            crate::api::brain::increment_counter(&db, &agent.id, "corrections_applied");
+        }
+        let corrections: Vec<String> = correction_entries.iter()
             .map(|k| format!("- {}", k.content))
             .collect();
         if !preferences.is_empty() || !corrections.is_empty() {
@@ -416,6 +421,8 @@ pub async fn chat_completions(
                 // Keyword matching for inline recall (semantic search available for batch via recall_smart)
                 let knowledge = crate::knowledge::recall_relevant(&db, &agent.id, last_user_msg, 10).unwrap_or_default();
                 if !knowledge.is_empty() {
+                    // Track: facts used in tasks
+                    crate::api::brain::increment_counter(&db, &agent.id, "facts_used");
                     let knowledge_text = knowledge.iter()
                         .map(|k| {
                             let valence_note = match k.valence {
@@ -719,9 +726,10 @@ pub async fn chat_completions(
                     }
                 }
 
-                // Log the prevention
+                // Log the prevention + increment counter
                 {
                     let db = state.db.lock().await;
+                    crate::api::brain::increment_counter(&db, &agent.id, "mistakes_prevented");
                     let _ = audit::log_action(&db, &AuditEntry {
                         id: uuid::Uuid::new_v4().to_string(), agent_id: agent.id.clone(),
                         created_at: chrono::Utc::now().to_rfc3339(), action_type: "mistake_prevented".into(),
@@ -1120,6 +1128,29 @@ async fn finish_task(
 
     emit_status(&state, agent_id, "idle");
     emit_refresh(&state);
+
+    // First-task cost toast: show once ever per agent
+    {
+        let db = state.db.lock().await;
+        let first_toast_key = format!("first_task_toast_{}", agent_id);
+        let shown: bool = db.query_row(
+            "SELECT COUNT(*) FROM config_store WHERE key = ?1", rusqlite::params![first_toast_key], |r| r.get::<_, i64>(0),
+        ).unwrap_or(0) > 0;
+        if !shown {
+            let _ = db.execute(
+                "INSERT INTO config_store (key, value) VALUES (?1, '1') ON CONFLICT(key) DO UPDATE SET value = '1'",
+                rusqlite::params![first_toast_key],
+            );
+            // Estimate: reflection ~500 + self-verify ~100 = ~600 tokens overhead
+            let est_cost = 600.0 / 1000.0 * 0.01;
+            if let Some(handle) = &state.app_handle {
+                let _ = handle.emit("toast", serde_json::json!({
+                    "type": "learning",
+                    "message": format!("greencube used ~600 extra tokens (~${:.3}) for learning. this helps your agent improve over time.", est_cost)
+                }));
+            }
+        }
+    }
 
     // Record growth metrics + update drives + mood
     {

@@ -153,14 +153,69 @@ async fn run_reflection(
 
     let db = state.db.lock().await;
 
-    // Store knowledge entries with valence, route curiosities to curiosity queue
+    // Build a word set from the original conversation for quality checking
+    let conversation_words: std::collections::HashSet<String> = messages.iter()
+        .filter_map(|m| m["content"].as_str())
+        .flat_map(|s| s.split_whitespace())
+        .map(|w| w.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect::<String>())
+        .filter(|w| w.len() > 3)
+        .collect();
+
+    // Existing knowledge for dedup check
+    let existing_knowledge = knowledge::list_knowledge(&db, agent_id, 200).unwrap_or_default();
+    let existing_contents: std::collections::HashSet<String> = existing_knowledge.iter()
+        .map(|k| k.content.to_lowercase())
+        .collect();
+
+    // Store knowledge entries with quality guard
+    let mut stored = 0;
     for (category, entry_content, valence) in &knowledge_entries {
         if category == "curious" {
             let _ = crate::curiosity::add_curiosity(&db, agent_id, entry_content, Some(task_id));
-        } else {
-            let _ = knowledge::insert_knowledge_with_valence(&db, agent_id, entry_content, category, Some(task_id), *valence);
+            stored += 1;
+            continue;
         }
+
+        // Quality check 1: skip entries shorter than 5 words (too vague)
+        let word_count = entry_content.split_whitespace().count();
+        if word_count < 5 {
+            tracing::info!("Knowledge quality skip (too short: {} words): {}", word_count, entry_content);
+            let _ = crate::permissions::audit::log_action(&db, &crate::permissions::audit::AuditEntry {
+                id: uuid::Uuid::new_v4().to_string(), agent_id: agent_id.into(),
+                created_at: chrono::Utc::now().to_rfc3339(), action_type: "low_quality_skip".into(),
+                action_detail: format!("Too short ({} words): {}", word_count, entry_content),
+                permission_result: "skipped".into(), result: None, duration_ms: None, cost_cents: 0, error: None,
+            });
+            continue;
+        }
+
+        // Quality check 2: skip if no meaningful words from the conversation appear (hallucinated)
+        let entry_words: Vec<String> = entry_content.split_whitespace()
+            .map(|w| w.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect::<String>())
+            .filter(|w| w.len() > 4)
+            .collect();
+        let overlap = entry_words.iter().filter(|w| conversation_words.contains(*w)).count();
+        if !entry_words.is_empty() && overlap == 0 {
+            tracing::info!("Knowledge quality skip (no conversation overlap): {}", entry_content);
+            let _ = crate::permissions::audit::log_action(&db, &crate::permissions::audit::AuditEntry {
+                id: uuid::Uuid::new_v4().to_string(), agent_id: agent_id.into(),
+                created_at: chrono::Utc::now().to_rfc3339(), action_type: "low_quality_skip".into(),
+                action_detail: format!("No conversation overlap: {}", entry_content),
+                permission_result: "skipped".into(), result: None, duration_ms: None, cost_cents: 0, error: None,
+            });
+            continue;
+        }
+
+        // Quality check 3: skip exact duplicates
+        if existing_contents.contains(&entry_content.to_lowercase()) {
+            tracing::info!("Knowledge quality skip (duplicate): {}", entry_content);
+            continue;
+        }
+
+        let _ = knowledge::insert_knowledge_with_valence(&db, agent_id, entry_content, category, Some(task_id), *valence);
+        stored += 1;
     }
+    let skipped = knowledge_entries.len() - stored;
 
     // Update working context if provided
     if let Some(ctx) = &context_update {
@@ -204,8 +259,8 @@ async fn run_reflection(
         created_at: chrono::Utc::now().to_rfc3339(),
         event_type: "reflection".into(),
         summary: format!(
-            "Self-reflection: {} knowledge entries extracted{}",
-            knowledge_entries.len(),
+            "Self-reflection: {} entries stored, {} skipped (quality filter){}",
+            stored, skipped,
             if context_update.is_some() { ", context updated" } else { "" }
         ),
         raw_data: Some(content.to_string()),
@@ -217,13 +272,12 @@ async fn run_reflection(
 
     if let Some(handle) = &state.app_handle {
         let _ = handle.emit("activity-refresh", ());
-        // Toast: show the user what the creature learned
-        let count = knowledge_entries.len();
-        if count > 0 {
-            let msg = if count == 1 {
+        // Toast: show the user what the creature learned (only stored count, not skipped)
+        if stored > 0 {
+            let msg = if stored == 1 {
                 "learned 1 fact from that conversation".to_string()
             } else {
-                format!("learned {} facts from that conversation", count)
+                format!("learned {} facts from that conversation", stored)
             };
             let _ = handle.emit("toast", serde_json::json!({"type": "learning", "message": msg}));
         }

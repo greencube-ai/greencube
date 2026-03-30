@@ -73,7 +73,7 @@ pub fn append_context(conn: &Connection, agent_id: &str, text: &str) -> anyhow::
 
     let current = get_context(conn, agent_id)?;
 
-    // Check if a similar line already exists (80%+ word overlap = skip)
+    // Check if a similar line already exists
     if !current.is_empty() {
         let new_words: std::collections::HashSet<&str> = text.split_whitespace()
             .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
@@ -81,7 +81,8 @@ pub fn append_context(conn: &Connection, agent_id: &str, text: &str) -> anyhow::
             .collect();
 
         if !new_words.is_empty() {
-            for existing_line in current.lines() {
+            let lines: Vec<&str> = current.lines().collect();
+            for (i, existing_line) in lines.iter().enumerate() {
                 let existing_words: std::collections::HashSet<&str> = existing_line.split_whitespace()
                     .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
                     .filter(|w| w.len() > 2)
@@ -90,7 +91,13 @@ pub fn append_context(conn: &Connection, agent_id: &str, text: &str) -> anyhow::
 
                 let overlap = new_words.intersection(&existing_words).count();
                 let max_len = new_words.len().max(existing_words.len());
-                if max_len > 0 && (overlap as f64 / max_len as f64) >= 0.8 {
+                if max_len == 0 { continue; }
+                let ratio = overlap as f64 / max_len as f64;
+
+                // Last line: tighter check (60%) — consecutive reflections on similar tasks
+                // All other lines: standard check (80%)
+                let threshold = if i == lines.len() - 1 { 0.6 } else { 0.8 };
+                if ratio >= threshold {
                     return Ok(()); // too similar, skip
                 }
             }

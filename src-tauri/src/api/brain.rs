@@ -7,7 +7,6 @@ use crate::identity::registry;
 use crate::state::AppState;
 
 /// GET /brain — if one agent, show brain directly. If multiple, show list.
-/// GET /brain/:n — show brain for agent at position n (1-indexed).
 pub async fn brain(State(state): State<Arc<AppState>>) -> Response {
     let agents = {
         let db = state.db.lock().await;
@@ -64,6 +63,12 @@ async fn render_brain(state: &AppState, agent: &crate::identity::Agent) -> Strin
         (agent.successful_tasks as f64 / agent.total_tasks as f64 * 100.0) as i64
     } else { 0 };
 
+    // Budget status
+    let budget = state.config.read().await.cost.daily_background_token_budget;
+    let budget_ok = crate::token_usage::has_budget_remaining(&db, &agent.id, 0, budget).unwrap_or(true);
+    let bg_tokens = crate::token_usage::get_background_usage_today(&db, &agent.id).unwrap_or(0);
+    let bg_cost = bg_tokens as f64 / 1000.0 * 0.01;
+
     // Knowledge
     let knowledge = crate::knowledge::list_knowledge(&db, &agent.id, 50).unwrap_or_default();
     let non_stale: Vec<_> = knowledge.iter().filter(|k| !k.stale).collect();
@@ -74,14 +79,22 @@ async fn render_brain(state: &AppState, agent: &crate::identity::Agent) -> Strin
     // Recent episodes
     let episodes = crate::memory::episodic::get_episodes(&db, &agent.id, 10, None).unwrap_or_default();
 
+    // Proof counters
+    let mistakes_prevented = get_counter(&db, &agent.id, "mistakes_prevented");
+    let facts_used = get_counter(&db, &agent.id, "facts_used");
+    let corrections_applied = get_counter(&db, &agent.id, "corrections_applied");
+
     drop(db);
 
     let mut out = String::new();
 
     // Header
     out.push_str(&format!("---\ngreencube agent: {}\n", agent.name));
-    out.push_str(&format!("mood: {}\n", mood));
-    out.push_str(&format!("tasks: {} | success: {}%\n", agent.total_tasks, success_pct));
+    out.push_str(&format!("mood: {} | {} tasks | {}% success\n", mood, agent.total_tasks, success_pct));
+    if !budget_ok {
+        out.push_str("status: learning paused (daily budget reached, resumes tomorrow)\n");
+    }
+    out.push_str(&format!("greencube overhead today: ~{} tokens (~${:.3})\n", bg_tokens, bg_cost));
     out.push_str("---\n");
 
     // Knowledge
@@ -113,6 +126,15 @@ async fn render_brain(state: &AppState, agent: &crate::identity::Agent) -> Strin
     }
     out.push_str("---\n");
 
+    // Improvements / proof
+    if mistakes_prevented > 0 || facts_used > 0 || corrections_applied > 0 {
+        out.push_str("improvements:\n");
+        if mistakes_prevented > 0 { out.push_str(&format!("  mistakes prevented: {}\n", mistakes_prevented)); }
+        if facts_used > 0 { out.push_str(&format!("  facts used in tasks: {}\n", facts_used)); }
+        if corrections_applied > 0 { out.push_str(&format!("  corrections applied: {}\n", corrections_applied)); }
+        out.push_str("---\n");
+    }
+
     // Recent activity
     if episodes.is_empty() {
         out.push_str("recent: no activity yet\n");
@@ -138,7 +160,7 @@ async fn render_brain(state: &AppState, agent: &crate::identity::Agent) -> Strin
     out
 }
 
-/// GET /status — one line summary
+/// GET /status — one line summary with cost
 pub async fn status(State(state): State<Arc<AppState>>) -> String {
     let db = state.db.lock().await;
     let agents = registry::list_agents(&db).unwrap_or_default();
@@ -152,11 +174,16 @@ pub async fn status(State(state): State<Arc<AppState>>) -> String {
         crate::knowledge::list_knowledge(&db, &a.id, 1000).map(|k| k.len() as i64).unwrap_or(0)
     }).sum();
 
+    let total_bg_tokens: i64 = agents.iter().map(|a| {
+        crate::token_usage::get_background_usage_today(&db, &a.id).unwrap_or(0)
+    }).sum();
+    let bg_cost = total_bg_tokens as f64 / 1000.0 * 0.01;
+
     if agents.len() == 1 {
         let mood = crate::mood::get_mood(&db, &agents[0].id);
-        format!("running | {} tasks | {} facts learned | mood: {}\n", total_tasks, total_knowledge, mood)
+        format!("running | {} tasks | {} facts learned | mood: {} | overhead today: ~${:.3}\n", total_tasks, total_knowledge, mood, bg_cost)
     } else {
-        format!("running | {} agents | {} tasks | {} facts learned\n", agents.len(), total_tasks, total_knowledge)
+        format!("running | {} agents | {} tasks | {} facts learned | overhead today: ~${:.3}\n", agents.len(), total_tasks, total_knowledge, bg_cost)
     }
 }
 
@@ -169,10 +196,8 @@ pub async fn log(State(state): State<Arc<AppState>>) -> String {
         return "no activity yet.\n".to_string();
     }
 
-    // Collect recent audit entries across all agents
     let entries = crate::permissions::audit::get_recent_activity(&db, 40).unwrap_or_default();
 
-    // Map agent_id to name for display
     let agent_map: std::collections::HashMap<String, String> = agents.iter()
         .map(|a| (a.id.clone(), a.name.clone()))
         .collect();
@@ -202,9 +227,25 @@ pub async fn log(State(state): State<Arc<AppState>>) -> String {
         out.push_str(&format!("  {:10} {}{}\n", ago, prefix, detail_short));
     }
 
-    if out.is_empty() {
-        "no activity yet.\n".to_string()
-    } else {
-        out
-    }
+    if out.is_empty() { "no activity yet.\n".to_string() } else { out }
+}
+
+// --- Counter helpers ---
+
+fn get_counter(conn: &rusqlite::Connection, agent_id: &str, name: &str) -> i64 {
+    let key = format!("counter_{}_{}", agent_id, name);
+    conn.query_row(
+        "SELECT CAST(value AS INTEGER) FROM config_store WHERE key = ?1",
+        rusqlite::params![key],
+        |row| row.get(0),
+    ).unwrap_or(0)
+}
+
+pub fn increment_counter(conn: &rusqlite::Connection, agent_id: &str, name: &str) {
+    let key = format!("counter_{}_{}", agent_id, name);
+    let current = get_counter(conn, agent_id, name);
+    let _ = conn.execute(
+        "INSERT INTO config_store (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = ?2",
+        rusqlite::params![key, (current + 1).to_string()],
+    );
 }
