@@ -204,21 +204,34 @@ pub async fn rate_response(agent_id: String, task_id: String, rating: i32, state
     crate::ratings::rate_response(&db, &agent_id, &task_id, rating)
         .map_err(|e| GreenCubeError::Internal(e.to_string()))?;
 
-    // Thumbs down → lower competence + store as knowledge for future avoidance
+    // Thumbs down → lower competence + store specific correction
     if rating < 0 {
-        if let Ok(Some(domain)) = crate::competence::get_most_recent_domain(&db, &agent_id) {
-            let _ = crate::competence::update_competence(&db, &agent_id, &domain, false, None);
-            tracing::info!("Human thumbs-down: competence lowered for agent {} domain '{}'", agent_id, domain);
+        let domain = crate::competence::get_most_recent_domain(&db, &agent_id).ok().flatten();
+        if let Some(ref d) = domain {
+            let _ = crate::competence::update_competence(&db, &agent_id, d, false, None);
+            tracing::info!("Human thumbs-down: competence lowered for agent {} domain '{}'", agent_id, d);
         }
+
+        // Look up what the task was actually about for a useful correction
+        let task_summary = crate::memory::episodic::get_episodes(&db, &agent_id, 5, Some(&task_id))
+            .unwrap_or_default()
+            .into_iter()
+            .find(|e| e.event_type == "task_start")
+            .map(|e| e.summary.replace("Task started: ", ""))
+            .unwrap_or_else(|| "unknown task".to_string());
+
+        let domain_label = domain.as_deref().unwrap_or("general");
         let _ = crate::knowledge::insert_knowledge(
             &db, &agent_id,
-            &format!("User disapproved output in task {}. Avoid this approach in future.", task_id),
+            &format!("CORRECTION [{}]: User rejected response about '{}'. Do not repeat this approach.", domain_label, task_summary),
             "correction", Some(&task_id),
         );
     } else if rating > 0 {
+        let domain = crate::competence::get_most_recent_domain(&db, &agent_id).ok().flatten();
+        let domain_label = domain.as_deref().unwrap_or("general");
         let _ = crate::knowledge::insert_knowledge(
             &db, &agent_id,
-            &format!("User approved output in task {}. This approach worked well.", task_id),
+            &format!("PRAISED [{}]: User approved this response.", domain_label),
             "praise", Some(&task_id),
         );
     }

@@ -673,20 +673,29 @@ pub async fn chat_completions(
         // Only on the first non-tool response (no retry loop), and only once per task
         let assistant_content = response_body["choices"][0]["message"]["content"].as_str().unwrap_or("");
         if !assistant_content.is_empty() && iteration == 1 {
+            // Words that appear in every correction but carry no meaning for matching
+            const CORRECTION_STOP: &[&str] = &[
+                "correction", "user", "rejected", "response", "about", "repeat",
+                "approach", "approved", "output", "avoid", "future", "task",
+                "disapproved", "praised", "general", "unknown",
+            ];
+
             let matching_corrections: Vec<String> = {
                 let db = state.db.lock().await;
                 let all_knowledge = crate::knowledge::list_knowledge(&db, &agent.id, 100).unwrap_or_default();
                 all_knowledge.iter()
                     .filter(|k| k.category == "correction")
                     .filter(|k| {
-                        // Keyword match: check if correction keywords appear in response
+                        // Extract meaningful words only (skip boilerplate and short words)
                         let correction_words: Vec<String> = k.content.split_whitespace()
-                            .map(|w| w.to_lowercase())
+                            .map(|w| w.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect::<String>())
                             .filter(|w| w.len() > 4)
+                            .filter(|w| !CORRECTION_STOP.contains(&w.as_str()))
                             .collect();
                         let response_lower = assistant_content.to_lowercase();
                         let matches = correction_words.iter().filter(|w| response_lower.contains(w.as_str())).count();
-                        correction_words.len() >= 2 && matches >= correction_words.len() / 2
+                        // Require 3+ meaningful words AND 75% match
+                        correction_words.len() >= 3 && matches as f64 >= correction_words.len() as f64 * 0.75
                     })
                     .take(2)
                     .map(|k| k.content.clone())

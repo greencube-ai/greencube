@@ -108,6 +108,7 @@ export function Layout({ children }: LayoutProps) {
               : toast.type === 'verify_bad' ? '#eab308'
               : toast.type === 'learning' ? '#3b82f6'
               : toast.type === 'error' ? '#ef4444'
+              : toast.type === 'warning' ? '#f97316'
               : '#71717a';
             const icon = toast.type === 'verify_good' ? '\u2713'
               : toast.type === 'verify_bad' ? '!'

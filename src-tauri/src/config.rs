@@ -53,7 +53,7 @@ pub struct CostConfig {
 
 impl Default for CostConfig {
     fn default() -> Self {
-        Self { daily_background_token_budget: 10000 }
+        Self { daily_background_token_budget: 50000 }
     }
 }
 

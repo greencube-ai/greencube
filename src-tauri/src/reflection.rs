@@ -57,6 +57,17 @@ async fn run_reflection(
         let budget = state.config.read().await.cost.daily_background_token_budget;
         if !crate::token_usage::has_budget_remaining(&db, agent_id, 500, budget)? {
             tracing::info!("Budget exceeded, skipping reflection for agent {}", agent_id);
+            // Toast the user once per day when budget is first hit
+            let budget_toast_key = format!("budget_toast_{}_{}", agent_id, chrono::Utc::now().format("%Y-%m-%d"));
+            let already_toasted: bool = db.query_row(
+                "SELECT COUNT(*) FROM config_store WHERE key = ?1", rusqlite::params![budget_toast_key], |r| r.get::<_, i64>(0),
+            ).unwrap_or(0) > 0;
+            if !already_toasted {
+                let _ = db.execute("INSERT INTO config_store (key, value) VALUES (?1, '1') ON CONFLICT(key) DO UPDATE SET value = '1'", rusqlite::params![budget_toast_key]);
+                if let Some(handle) = &state.app_handle {
+                    let _ = handle.emit("toast", serde_json::json!({"type": "warning", "message": "daily learning budget reached — resumes tomorrow"}));
+                }
+            }
             let _ = crate::permissions::audit::log_action(&db, &crate::permissions::audit::AuditEntry {
                 id: uuid::Uuid::new_v4().to_string(), agent_id: agent_id.into(),
                 created_at: chrono::Utc::now().to_rfc3339(), action_type: "budget_skip".into(),
