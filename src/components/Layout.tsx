@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { getServerInfo, getUnreadCount, getNotifications, dismissAllNotifications, markNotificationRead } from '../lib/invoke';
 import { listen } from '@tauri-apps/api/event';
+import { onToast } from '../lib/events';
 import type { Notification } from '../lib/types';
 
+interface Toast { id: number; type: string; message: string; }
 interface LayoutProps { children: React.ReactNode; }
 
 const navItems = [
@@ -19,14 +21,22 @@ export function Layout({ children }: LayoutProps) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifs, setShowNotifs] = useState(false);
   const [notifs, setNotifs] = useState<Notification[]>([]);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const addToast = useCallback((type: string, message: string) => {
+    const id = Date.now() + Math.random();
+    setToasts(prev => [...prev, { id, type, message }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000);
+  }, []);
 
   useEffect(() => {
     getServerInfo().then((info) => setPort(info.port)).catch(() => {});
     getUnreadCount().then(setUnreadCount).catch(() => {});
     const interval = setInterval(() => { getUnreadCount().then(setUnreadCount).catch(() => {}); }, 10000);
     const unlisten = listen('notification-new', () => { getUnreadCount().then(setUnreadCount).catch(() => {}); });
-    return () => { clearInterval(interval); unlisten.then(fn => fn()); };
-  }, []);
+    const unlistenToast = onToast((data) => addToast(data.type, data.message));
+    return () => { clearInterval(interval); unlisten.then(fn => fn()); unlistenToast.then(fn => fn()); };
+  }, [addToast]);
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -89,6 +99,36 @@ export function Layout({ children }: LayoutProps) {
       <main className="flex-1 overflow-y-auto h-screen">
         <div className="px-8 py-6">{children}</div>
       </main>
+
+      {/* Toast notifications */}
+      {toasts.length > 0 && (
+        <div className="fixed bottom-4 right-4 flex flex-col gap-2 z-50">
+          {toasts.map(toast => {
+            const color = toast.type === 'verify_good' ? '#22c55e'
+              : toast.type === 'verify_bad' ? '#eab308'
+              : toast.type === 'learning' ? '#3b82f6'
+              : toast.type === 'error' ? '#ef4444'
+              : '#71717a';
+            const icon = toast.type === 'verify_good' ? '\u2713'
+              : toast.type === 'verify_bad' ? '!'
+              : toast.type === 'learning' ? '\u2726'
+              : toast.type === 'error' ? '\u2717'
+              : '\u2022';
+            return (
+              <div key={toast.id} className="toast-enter flex items-center gap-2 px-4 py-2.5 rounded-lg border text-sm"
+                style={{
+                  backgroundColor: 'var(--bg-secondary)',
+                  borderColor: color + '30',
+                  boxShadow: `0 4px 12px ${color}15`,
+                  maxWidth: 320,
+                }}>
+                <span style={{ color, fontSize: 14, fontWeight: 700 }}>{icon}</span>
+                <span className="text-[var(--text-secondary)]">{toast.message}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

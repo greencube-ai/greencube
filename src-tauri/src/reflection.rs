@@ -206,6 +206,16 @@ async fn run_reflection(
 
     if let Some(handle) = &state.app_handle {
         let _ = handle.emit("activity-refresh", ());
+        // Toast: show the user what the creature learned
+        let count = knowledge_entries.len();
+        if count > 0 {
+            let msg = if count == 1 {
+                "learned 1 fact from that conversation".to_string()
+            } else {
+                format!("learned {} facts from that conversation", count)
+            };
+            let _ = handle.emit("toast", serde_json::json!({"type": "learning", "message": msg}));
+        }
     }
 
     tracing::info!(

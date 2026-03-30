@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use tauri::Emitter;
 use crate::competence;
 use crate::providers::Provider;
 use crate::state::AppState;
@@ -162,12 +163,22 @@ async fn run_verification(
                 "INSERT INTO config_store (key, value) VALUES (?1, '1') ON CONFLICT(key) DO UPDATE SET value = '1'",
                 rusqlite::params![urgent_key],
             );
+
+            // Toast: tell the user
+            if let Some(handle) = &state.app_handle {
+                let _ = handle.emit("toast", serde_json::json!({"type": "verify_bad", "message": "verified output: needs improvement"}));
+            }
         }
     } else {
         tracing::info!("Self-verification: agent {} rated task {} as GOOD", agent_id, task_id);
         // Reward knowledge that was recently injected — it helped produce a good result
         let db = state.db.lock().await;
         let _ = crate::knowledge::bump_success_for_recent(&db, agent_id);
+
+        // Toast: tell the user
+        if let Some(handle) = &state.app_handle {
+            let _ = handle.emit("toast", serde_json::json!({"type": "verify_good", "message": "verified output: good"}));
+        }
     }
 
     Ok(())
