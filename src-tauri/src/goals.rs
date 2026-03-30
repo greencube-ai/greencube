@@ -23,21 +23,19 @@ pub struct Goal {
 }
 
 pub fn list_goals(conn: &Connection, agent_id: &str, status: Option<&str>) -> anyhow::Result<Vec<Goal>> {
-    let (sql, param_count) = if let Some(s) = status {
-        ("SELECT id, agent_id, content, status, progress_notes, created_at, updated_at FROM agent_goals WHERE agent_id = ?1 AND status = ?2 ORDER BY created_at DESC", 2)
+    if let Some(s) = status {
+        let mut stmt = conn.prepare(
+            "SELECT id, agent_id, content, status, progress_notes, created_at, updated_at FROM agent_goals WHERE agent_id = ?1 AND status = ?2 ORDER BY created_at DESC"
+        )?;
+        let goals = stmt.query_map(params![agent_id, s], map_goal)?.collect::<Result<Vec<_>, _>>()?;
+        Ok(goals)
     } else {
-        ("SELECT id, agent_id, content, status, progress_notes, created_at, updated_at FROM agent_goals WHERE agent_id = ?1 ORDER BY created_at DESC LIMIT 20", 1)
-    };
-
-    let mut stmt = conn.prepare(sql)?;
-    let goals = if param_count == 2 {
-        stmt.query_map(params![agent_id, status.unwrap()], map_goal)?
-            .collect::<Result<Vec<_>, _>>()?
-    } else {
-        stmt.query_map(params![agent_id], map_goal)?
-            .collect::<Result<Vec<_>, _>>()?
-    };
-    Ok(goals)
+        let mut stmt = conn.prepare(
+            "SELECT id, agent_id, content, status, progress_notes, created_at, updated_at FROM agent_goals WHERE agent_id = ?1 ORDER BY created_at DESC LIMIT 20"
+        )?;
+        let goals = stmt.query_map(params![agent_id], map_goal)?.collect::<Result<Vec<_>, _>>()?;
+        Ok(goals)
+    }
 }
 
 pub fn count_active_goals(conn: &Connection, agent_id: &str) -> anyhow::Result<i64> {
@@ -106,10 +104,10 @@ async fn generate_goals(
     let slots_available = MAX_ACTIVE_GOALS - current_active;
     if slots_available <= 0 { return Ok(()); }
 
-    // Budget check
+    // Budget check — read config before db lock to avoid deadlock
+    let budget = state.config.read().await.cost.daily_background_token_budget;
     {
         let db = state.db.lock().await;
-        let budget = state.config.read().await.cost.daily_background_token_budget;
         if !crate::token_usage::has_budget_remaining(&db, agent_id, 300, budget)? {
             tracing::info!("Budget exceeded, skipping goal generation for agent {}", agent_id);
             return Ok(());

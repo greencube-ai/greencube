@@ -77,9 +77,10 @@ pub async fn run_idle_thinker(state: Arc<AppState>) {
             }
 
             // Budget check: skip if daily background token budget exceeded
+            // Read config BEFORE acquiring db lock to avoid deadlock
+            let budget = state.config.read().await.cost.daily_background_token_budget;
             {
                 let db = state.db.lock().await;
-                let budget = state.config.read().await.cost.daily_background_token_budget;
                 if !crate::token_usage::has_budget_remaining(&db, &agent.id, 400, budget).unwrap_or(false) {
                     tracing::info!("Budget exceeded, skipping idle think for agent {}", agent.id);
                     continue;

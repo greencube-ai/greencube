@@ -36,10 +36,10 @@ async fn run_verification(
     task_id: &str,
     domain: Option<&str>,
 ) -> anyhow::Result<()> {
-    // Budget check
+    // Budget check — read config before db lock to avoid deadlock
+    let budget = state.config.read().await.cost.daily_background_token_budget;
     {
         let db = state.db.lock().await;
-        let budget = state.config.read().await.cost.daily_background_token_budget;
         if !crate::token_usage::has_budget_remaining(&db, agent_id, 100, budget)? {
             tracing::info!("Budget exceeded, skipping self-verify for agent {}", agent_id);
             return Ok(());

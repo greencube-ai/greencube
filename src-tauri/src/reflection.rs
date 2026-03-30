@@ -52,9 +52,10 @@ async fn run_reflection(
     task_id: &str,
 ) -> anyhow::Result<()> {
     // Budget check: skip if daily background token budget exceeded
+    // Read config BEFORE db lock to avoid deadlock
+    let budget = state.config.read().await.cost.daily_background_token_budget;
     {
         let db = state.db.lock().await;
-        let budget = state.config.read().await.cost.daily_background_token_budget;
         if !crate::token_usage::has_budget_remaining(&db, agent_id, 500, budget)? {
             tracing::info!("Budget exceeded, skipping reflection for agent {}", agent_id);
             // Toast the user once per day when budget is first hit
