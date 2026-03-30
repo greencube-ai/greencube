@@ -107,8 +107,7 @@ async fn render_brain(state: &AppState, agent: &crate::identity::Agent) -> Strin
         for c in &competence {
             let pct = (c.confidence * 100.0) as i64;
             let filled = (c.confidence * 10.0) as usize;
-            let empty = 10 - filled.min(10);
-            let bar: String = "\u{2588}".repeat(filled) + &"\u{2591}".repeat(empty);
+            let bar: String = "\u{2588}".repeat(filled.min(10));
             out.push_str(&format!("  {:12} {} {}%\n", c.domain, bar, pct));
         }
     }
