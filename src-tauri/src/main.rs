@@ -154,7 +154,7 @@ fn main() {
 
             let brain_handle = handle.clone();
             let _tray = tauri::tray::TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(app.default_window_icon().expect("app icon must be bundled").clone())
                 .menu(&menu)
                 .tooltip("GreenCube running")
                 .on_menu_event(move |_app, event| {
