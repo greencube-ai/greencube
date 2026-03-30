@@ -54,32 +54,84 @@ pub async fn brain_by_index(
     render_brain(&state, &agents[index - 1]).await.into_response()
 }
 
+/// Phrases that indicate ignorance, not knowledge. Filter these from display.
+const JUNK_KNOWLEDGE: &[&str] = &[
+    "i don't have any information",
+    "i don't know",
+    "i'm not sure",
+    "i don't have access",
+    "i cannot",
+    "no context or goals",
+    "no information available",
+    "there is no context",
+    "limits my abi",
+    "i do not have",
+    "store the observation that there is no",
+    "enhancing my built-in",
+];
+
+fn is_junk_knowledge(content: &str) -> bool {
+    let lower = content.to_lowercase();
+    JUNK_KNOWLEDGE.iter().any(|p| lower.contains(p))
+        || lower.starts_with("failed in")
+        || lower.starts_with("correction")
+        || lower.starts_with("praised")
+        || lower.starts_with("user disapproved")
+        || lower.starts_with("user approved")
+}
+
 async fn render_brain(state: &AppState, agent: &crate::identity::Agent) -> String {
+    let budget = state.config.read().await.cost.daily_background_token_budget;
     let db = state.db.lock().await;
 
-    // Mood
     let mood = crate::mood::get_mood(&db, &agent.id);
     let success_pct = if agent.total_tasks > 0 {
         (agent.successful_tasks as f64 / agent.total_tasks as f64 * 100.0) as i64
     } else { 0 };
 
-    // Budget status
-    let budget = state.config.read().await.cost.daily_background_token_budget;
     let budget_ok = crate::token_usage::has_budget_remaining(&db, &agent.id, 0, budget).unwrap_or(true);
     let bg_tokens = crate::token_usage::get_background_usage_today(&db, &agent.id).unwrap_or(0);
     let bg_cost = bg_tokens as f64 / 1000.0 * 0.01;
 
-    // Knowledge
+    // Knowledge — filter out junk, failures, corrections, stale
     let knowledge = crate::knowledge::list_knowledge(&db, &agent.id, 50).unwrap_or_default();
-    let non_stale: Vec<_> = knowledge.iter().filter(|k| !k.stale).collect();
+    let clean_facts: Vec<_> = knowledge.iter()
+        .filter(|k| !k.stale)
+        .filter(|k| k.category == "fact" || k.category == "preference" || k.category == "skill" || k.category == "synthesis")
+        .filter(|k| !is_junk_knowledge(&k.content))
+        .collect();
 
-    // Competence
     let competence = crate::competence::get_competence_map(&db, &agent.id).unwrap_or_default();
 
-    // Recent episodes
-    let episodes = crate::memory::episodic::get_episodes(&db, &agent.id, 10, None).unwrap_or_default();
+    // Recent: only task_start episodes, deduplicated
+    let episodes = crate::memory::episodic::get_episodes(&db, &agent.id, 30, None).unwrap_or_default();
+    let mut seen_tasks: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let recent_tasks: Vec<_> = episodes.iter()
+        .filter(|ep| ep.event_type == "task_start" || ep.event_type == "task_end")
+        .filter(|ep| {
+            if let Some(ref tid) = ep.task_id {
+                seen_tasks.insert(tid.clone())
+            } else { false }
+        })
+        .take(5)
+        .collect();
 
-    // Proof counters
+    // Match task_start with task_end to get outcomes
+    let task_outcomes: Vec<(String, String, String)> = recent_tasks.iter().map(|ep| {
+        let prompt = ep.summary.replace("Task started: ", "");
+        let prompt_short: String = prompt.chars().take(50).collect();
+        let prompt_display = if prompt.chars().count() > 50 { format!("{}...", prompt_short) } else { prompt_short };
+
+        let outcome = if let Some(ref tid) = ep.task_id {
+            episodes.iter()
+                .find(|e| e.event_type == "task_end" && e.task_id.as_deref() == Some(tid))
+                .and_then(|e| e.outcome.clone())
+                .unwrap_or_else(|| "pending".to_string())
+        } else { "unknown".to_string() };
+
+        (ep.created_at.clone(), prompt_display, outcome)
+    }).collect();
+
     let mistakes_prevented = get_counter(&db, &agent.id, "mistakes_prevented");
     let facts_used = get_counter(&db, &agent.id, "facts_used");
     let corrections_applied = get_counter(&db, &agent.id, "corrections_applied");
@@ -89,72 +141,64 @@ async fn render_brain(state: &AppState, agent: &crate::identity::Agent) -> Strin
     let mut out = String::new();
 
     // Header
-    out.push_str(&format!("---\ngreencube agent: {}\n", agent.name));
-    out.push_str(&format!("mood: {} | {} tasks | {}% success\n", mood, agent.total_tasks, success_pct));
+    out.push_str(&format!("\u{1F9E0} {} | mood: {} | {} tasks | {}% success\n", agent.name, mood, agent.total_tasks, success_pct));
     if !budget_ok {
-        out.push_str("status: learning paused (daily budget reached, resumes tomorrow)\n");
+        out.push_str("   learning paused (daily budget reached, resumes tomorrow)\n");
     }
-    out.push_str(&format!("greencube overhead today: ~{} tokens (~${:.3})\n", bg_tokens, bg_cost));
-    out.push_str("---\n");
 
-    // Knowledge
-    if non_stale.is_empty() {
-        out.push_str("what i know: nothing yet\n");
+    // Learned
+    if clean_facts.is_empty() {
+        out.push_str("learned: nothing yet\n");
     } else {
-        out.push_str(&format!("what i know ({} facts):\n", non_stale.len()));
-        for k in non_stale.iter().take(15) {
+        out.push_str("learned:\n");
+        for k in clean_facts.iter().take(15) {
             let content: String = k.content.chars().take(80).collect();
-            out.push_str(&format!("  - {}\n", content));
+            out.push_str(&format!("  \u{2022} {}\n", content));
         }
-        if non_stale.len() > 15 {
-            out.push_str(&format!("  ... and {} more\n", non_stale.len() - 15));
+        if clean_facts.len() > 15 {
+            out.push_str(&format!("  ... and {} more\n", clean_facts.len() - 15));
         }
     }
-    out.push_str("---\n");
 
-    // Competence bars
-    if competence.is_empty() {
-        out.push_str("what im good at: no data yet\n");
-    } else {
-        out.push_str("what im good at:\n");
+    // Good at
+    if !competence.is_empty() {
+        out.push_str("good at:\n");
         for c in &competence {
             let pct = (c.confidence * 100.0) as i64;
-            let filled = (c.confidence * 10.0) as usize;
-            let bar: String = "\u{2588}".repeat(filled.min(10));
-            out.push_str(&format!("  {:12} {} {}%\n", c.domain, bar, pct));
+            let filled = (c.confidence * 5.0) as usize;
+            let empty = 5 - filled.min(5);
+            let bar = format!("{}{}", "\u{2588}".repeat(filled.min(5)), "\u{2591}".repeat(empty));
+            out.push_str(&format!("  \u{2022} {:12} {} {}%\n", c.domain, bar, pct));
         }
     }
-    out.push_str("---\n");
 
-    // Improvements / proof
+    // Improvements
     if mistakes_prevented > 0 || facts_used > 0 || corrections_applied > 0 {
         out.push_str("improvements:\n");
-        if mistakes_prevented > 0 { out.push_str(&format!("  mistakes prevented: {}\n", mistakes_prevented)); }
-        if facts_used > 0 { out.push_str(&format!("  facts used in tasks: {}\n", facts_used)); }
-        if corrections_applied > 0 { out.push_str(&format!("  corrections applied: {}\n", corrections_applied)); }
-        out.push_str("---\n");
+        if mistakes_prevented > 0 { out.push_str(&format!("  \u{2022} {} mistakes prevented\n", mistakes_prevented)); }
+        if facts_used > 0 { out.push_str(&format!("  \u{2022} {} facts used in tasks\n", facts_used)); }
+        if corrections_applied > 0 { out.push_str(&format!("  \u{2022} {} corrections applied\n", corrections_applied)); }
     }
 
-    // Recent activity
-    if episodes.is_empty() {
-        out.push_str("recent: no activity yet\n");
-    } else {
+    // Recent tasks
+    if !task_outcomes.is_empty() {
         out.push_str("recent:\n");
         let now = chrono::Utc::now();
-        for ep in episodes.iter().take(10) {
-            let ago = if let Ok(t) = chrono::DateTime::parse_from_rfc3339(&ep.created_at) {
+        for (ts, prompt, outcome) in &task_outcomes {
+            let ago = if let Ok(t) = chrono::DateTime::parse_from_rfc3339(ts) {
                 let mins = now.signed_duration_since(t).num_minutes();
                 if mins < 1 { "just now".to_string() }
-                else if mins < 60 { format!("{}min ago", mins) }
-                else if mins < 1440 { format!("{}hr ago", mins / 60) }
+                else if mins < 60 { format!("{}m ago", mins) }
+                else if mins < 1440 { format!("{}h ago", mins / 60) }
                 else { format!("{}d ago", mins / 1440) }
-            } else {
-                "?".to_string()
-            };
-            let summary: String = ep.summary.chars().take(60).collect();
-            out.push_str(&format!("  {:10} {}\n", ago, summary));
+            } else { "?".to_string() };
+            let icon = if outcome == "success" { "\u{2713}" } else if outcome == "failure" { "\u{2717}" } else { "\u{2022}" };
+            out.push_str(&format!("  {} {:8} \"{}\"\n", icon, ago, prompt));
         }
     }
+
+    // Cost
+    out.push_str(&format!("today: ~{} tokens (~${:.3})\n", bg_tokens, bg_cost));
     out.push('\n');
 
     out
