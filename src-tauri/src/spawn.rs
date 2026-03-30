@@ -14,9 +14,9 @@ use crate::state::AppState;
 
 const MAX_CHILDREN: i64 = 3;
 const MAX_TOTAL_AGENTS: i64 = 10; // SECURITY: Global cap on total agents to prevent runaway spawning
-const MIN_DOMAIN_TASKS: i64 = 8;
-const MAX_COMPETENCE_FOR_SPAWN: f64 = 0.55;
-const MIN_TOTAL_TASKS: i64 = 20;
+const MIN_DOMAIN_TASKS: i64 = 5; // 5 tasks in a domain before spawning is considered
+const MAX_COMPETENCE_FOR_SPAWN: f64 = 0.75; // spawn if below 75% — realistic with 1-5 scoring
+const MIN_TOTAL_TASKS: i64 = 10; // 10 total tasks before any spawning
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LineageInfo {

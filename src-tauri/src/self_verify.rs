@@ -4,13 +4,20 @@ use crate::competence;
 use crate::providers::Provider;
 use crate::state::AppState;
 
-const VERIFY_PROMPT: &str = r#"Look at the conversation above. Did your response actually solve what the user asked? Was it accurate and complete?
+const VERIFY_PROMPT: &str = r#"You are a strict code reviewer. Grade the assistant's response above on a 1-5 scale.
 
-Rate yourself honestly. Use EXACTLY one of these on its own line:
-[quality] good
-[quality] bad — one sentence explaining why
+Be HARSH. Most responses have flaws. A 5 is exceptional — almost nothing deserves it.
 
-Be honest. If you're not sure, say bad."#;
+[score] N — one sentence justification
+
+Scoring:
+1 = wrong, harmful, or completely off-topic
+2 = partially correct but missing key details, or contains errors
+3 = acceptable but could be better (missing edge cases, verbose, not quite what was asked)
+4 = good, addresses the question well with minor room for improvement
+5 = excellent, complete, accurate, concise — nothing to improve
+
+Most responses are a 3. Be critical. If unsure between two scores, pick the lower one."#;
 
 /// Run self-verification after a task completes. Spawns as background task.
 pub fn spawn_verification(
@@ -105,79 +112,80 @@ async fn run_verification(
 
     let content = body["choices"][0]["message"]["content"]
         .as_str()
-        .unwrap_or("good");
+        .unwrap_or("[score] 3");
 
-    // Parse [quality] tag — find it anywhere in the response
-    let quality_good = if let Some(idx) = content.find("[quality]") {
-        let after = content[idx + 9..].trim();
-        after.starts_with("good")
+    // Parse [score] N — extract the number 1-5
+    let score: i32 = if let Some(idx) = content.find("[score]") {
+        let after = content[idx + 7..].trim();
+        after.chars().next().and_then(|c| c.to_digit(10)).map(|d| d as i32).unwrap_or(3)
     } else {
-        true // Default to good if no tag found
+        // Try to find just a standalone digit at the start
+        content.trim().chars().next().and_then(|c| c.to_digit(10)).map(|d| d as i32).unwrap_or(3)
+    };
+    let score = score.clamp(1, 5);
+
+    // Extract reason (everything after the number)
+    let reason = if let Some(idx) = content.find("[score]") {
+        let after = content[idx + 7..].trim();
+        let after = after.trim_start_matches(|c: char| c.is_numeric() || c == ' ');
+        let reason = after.trim_start_matches("—").trim_start_matches("-").trim();
+        if reason.is_empty() { "no details" } else { reason }
+    } else { "no details" };
+
+    tracing::info!("Self-verification: agent {} task {} scored {}/5: {}", agent_id, task_id, score, &reason[..reason.len().min(80)]);
+
+    // Get domain
+    let effective_domain = match domain {
+        Some(d) => Some(d.to_string()),
+        None => {
+            let db = state.db.lock().await;
+            competence::get_most_recent_domain(&db, agent_id).ok().flatten()
+        }
     };
 
-    if !quality_good {
-        // Extract reason
-        let reason = if let Some(idx) = content.find("[quality] bad") {
-            let after = content[idx + 13..].trim();
-            let reason = after.trim_start_matches("—").trim_start_matches("-").trim();
-            if reason.is_empty() { "self-rated as bad" } else { reason }
-        } else {
-            "self-rated as bad"
-        };
+    // Score 1-2: failure (competence drops, warning stored, urgency flag)
+    // Score 3: partial (competence marked as failure — this is the key change, 3 is not "good")
+    // Score 4-5: success (competence improves, knowledge rewarded)
+    let is_success = score >= 4;
 
-        tracing::info!("Self-verification: agent {} rated task {} as BAD: {}", agent_id, task_id, reason);
+    if let Some(ref d) = effective_domain {
+        let db = state.db.lock().await;
+        let _ = competence::update_competence(&db, agent_id, d, is_success, None);
+    }
 
-        // Update competence with failure — use provided domain or look up most recent
-        let effective_domain = match domain {
-            Some(d) => Some(d.to_string()),
-            None => {
-                let db = state.db.lock().await;
-                competence::get_most_recent_domain(&db, agent_id).ok().flatten()
-            }
-        };
-        if let Some(ref d) = effective_domain {
-            let db = state.db.lock().await;
-            let _ = competence::update_competence(&db, agent_id, d, false, None);
-            tracing::info!("Competence updated: agent {} domain '{}' (FAILURE from self-verify)", agent_id, d);
+    if score <= 2 {
+        // Bad: store warning, urgency flag, toast
+        let db = state.db.lock().await;
+        let domain_label = effective_domain.as_deref().unwrap_or("unknown");
+        let _ = crate::knowledge::insert_knowledge(
+            &db, agent_id,
+            &format!("FAILED in {}: {}. Need to investigate why.", domain_label, reason),
+            "warning", Some(task_id),
+        );
+        let _ = crate::context::append_context(
+            &db, agent_id,
+            &format!("Self-verify: {}/5 in {}. {}", score, domain_label, reason),
+        );
+        let urgent_key = format!("urgent_think_{}", agent_id);
+        let _ = db.execute(
+            "INSERT INTO config_store (key, value) VALUES (?1, '1') ON CONFLICT(key) DO UPDATE SET value = '1'",
+            rusqlite::params![urgent_key],
+        );
+        if let Some(handle) = &state.app_handle {
+            let _ = handle.emit("toast", serde_json::json!({"type": "verify_bad", "message": format!("self-check: {}/5 — {}", score, &reason[..reason.len().min(50)])}));
         }
-
-        // Store as actionable knowledge so the idle thinker can chain on it
-        {
-            let db = state.db.lock().await;
-            let domain_label = effective_domain.as_deref().unwrap_or("unknown");
-            let _ = crate::knowledge::insert_knowledge(
-                &db, agent_id,
-                &format!("FAILED in {}: {}. Need to investigate why.", domain_label, reason),
-                "warning", Some(task_id),
-            );
-
-            // Also write to scratchpad so idle thinker sees it immediately
-            let _ = crate::context::append_context(
-                &db, agent_id,
-                &format!("Self-verify: BAD in {}. Reason: {}", domain_label, reason),
-            );
-
-            // Set urgency flag — idle thinker will react within 60s
-            let urgent_key = format!("urgent_think_{}", agent_id);
-            let _ = db.execute(
-                "INSERT INTO config_store (key, value) VALUES (?1, '1') ON CONFLICT(key) DO UPDATE SET value = '1'",
-                rusqlite::params![urgent_key],
-            );
-
-            // Toast: tell the user
-            if let Some(handle) = &state.app_handle {
-                let _ = handle.emit("toast", serde_json::json!({"type": "verify_bad", "message": "verified output: needs improvement"}));
-            }
+    } else if score == 3 {
+        // Mediocre: competence already marked as failure above, toast but no urgency
+        if let Some(handle) = &state.app_handle {
+            let _ = handle.emit("toast", serde_json::json!({"type": "verify_bad", "message": format!("self-check: 3/5 — {}", &reason[..reason.len().min(50)])}));
         }
     } else {
-        tracing::info!("Self-verification: agent {} rated task {} as GOOD", agent_id, task_id);
-        // Reward knowledge that was recently injected — it helped produce a good result
+        // Good (4-5): reward knowledge, toast
         let db = state.db.lock().await;
         let _ = crate::knowledge::bump_success_for_recent(&db, agent_id);
-
-        // Toast: tell the user
         if let Some(handle) = &state.app_handle {
-            let _ = handle.emit("toast", serde_json::json!({"type": "verify_good", "message": "verified output: good"}));
+            let msg = if score == 5 { "self-check: 5/5 — excellent" } else { "self-check: 4/5 — good" };
+            let _ = handle.emit("toast", serde_json::json!({"type": "verify_good", "message": msg}));
         }
     }
 
