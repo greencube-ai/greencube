@@ -188,6 +188,14 @@ fn main() {
                 })
                 .build(app)?;
 
+            // If already set up, start hidden in tray. Only show window for fresh onboarding.
+            if config.ui.onboarding_complete {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                    tracing::info!("Onboarding complete — starting hidden in tray");
+                }
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

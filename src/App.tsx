@@ -8,7 +8,6 @@ import { Settings } from './pages/Settings';
 import { Connect } from './pages/Connect';
 import { OnboardingModal } from './components/OnboardingModal';
 
-// Error boundary to prevent white-screen crashes
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
   { hasError: boolean; error: string }
@@ -24,18 +23,10 @@ class ErrorBoundary extends React.Component<
     if (this.state.hasError) {
       return (
         <div className="flex flex-col items-center justify-center min-h-screen gap-4">
-          <div className="text-[var(--status-error)] text-lg">
-            Something went wrong
-          </div>
-          <div className="text-[var(--text-muted)] text-sm">
-            {this.state.error}
-          </div>
-          <button
-            onClick={() => window.location.reload()}
-            className="px-4 py-2 bg-[var(--accent)] text-black rounded-lg hover:bg-[var(--accent-hover)]"
-          >
-            Reload
-          </button>
+          <div className="text-[var(--status-error)] text-lg">Something went wrong</div>
+          <div className="text-[var(--text-muted)] text-sm">{this.state.error}</div>
+          <button onClick={() => window.location.reload()}
+            className="px-4 py-2 bg-[var(--accent)] text-black rounded-lg hover:bg-[var(--accent-hover)]">Reload</button>
         </div>
       );
     }
@@ -54,10 +45,12 @@ function AppContent() {
     );
   }
 
+  // Not set up yet — show onboarding
   if (state.config && !state.config.ui.onboarding_complete) {
     return <OnboardingModal />;
   }
 
+  // Already set up — show the dashboard (accessed via tray "Open Dashboard")
   return (
     <HashRouter>
       <Layout>
