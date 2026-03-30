@@ -189,19 +189,6 @@ fn main() {
 
     tracing::info!("Starting GreenCube v1.0.0");
 
-    // Interactive terminal setup on first run
-    let data_dir = config_dir();
-    std::fs::create_dir_all(&data_dir).expect("Failed to create ~/.greencube/");
-    let mut cfg = config::load_config().expect("Failed to load config");
-
-    if !cfg.ui.onboarding_complete {
-        run_terminal_setup(&mut cfg);
-    } else {
-        println!("\x1b[32m\x1b[1m[greencube]\x1b[0m proxy running on localhost:{}", cfg.server.port);
-        println!("\x1b[2mtype gc to see what your agent learned\x1b[0m");
-        println!();
-    }
-
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
