@@ -669,6 +669,66 @@ pub async fn chat_completions(
         }
         emit_refresh(&state);
 
+        // MISTAKE PREVENTION: check response against known corrections before returning
+        // Only on the first non-tool response (no retry loop), and only once per task
+        let assistant_content = response_body["choices"][0]["message"]["content"].as_str().unwrap_or("");
+        if !assistant_content.is_empty() && iteration == 1 {
+            let matching_corrections: Vec<String> = {
+                let db = state.db.lock().await;
+                let all_knowledge = crate::knowledge::list_knowledge(&db, &agent.id, 100).unwrap_or_default();
+                all_knowledge.iter()
+                    .filter(|k| k.category == "correction")
+                    .filter(|k| {
+                        // Keyword match: check if correction keywords appear in response
+                        let correction_words: Vec<String> = k.content.split_whitespace()
+                            .map(|w| w.to_lowercase())
+                            .filter(|w| w.len() > 4)
+                            .collect();
+                        let response_lower = assistant_content.to_lowercase();
+                        let matches = correction_words.iter().filter(|w| response_lower.contains(w.as_str())).count();
+                        correction_words.len() >= 2 && matches >= correction_words.len() / 2
+                    })
+                    .take(2)
+                    .map(|k| k.content.clone())
+                    .collect()
+            };
+
+            if !matching_corrections.is_empty() {
+                tracing::info!("Mistake prevention: detected {} matching corrections for agent {}", matching_corrections.len(), agent.id);
+
+                // Inject warning and retry ONCE
+                let warning = format!(
+                    "\n\nWARNING: A similar response previously received negative feedback. Issues were:\n{}\nRevise your answer to avoid these mistakes.",
+                    matching_corrections.iter().map(|c| format!("- {}", c)).collect::<Vec<_>>().join("\n")
+                );
+
+                if let Some(messages) = body["messages"].as_array_mut() {
+                    if let Some(sys) = messages.iter_mut().find(|m| m["role"] == "system") {
+                        if let Some(c) = sys["content"].as_str() {
+                            sys["content"] = serde_json::Value::String(format!("{}{}", c, warning));
+                        }
+                    }
+                }
+
+                // Log the prevention
+                {
+                    let db = state.db.lock().await;
+                    let _ = audit::log_action(&db, &AuditEntry {
+                        id: uuid::Uuid::new_v4().to_string(), agent_id: agent.id.clone(),
+                        created_at: chrono::Utc::now().to_rfc3339(), action_type: "mistake_prevented".into(),
+                        action_detail: format!("Detected {} known mistake patterns in response. Retrying with correction.", matching_corrections.len()),
+                        permission_result: "allowed".into(),
+                        result: None, duration_ms: None, cost_cents: 0, error: None,
+                    });
+                }
+                emit_refresh(&state);
+
+                // Skip this response and let the loop retry with the injected warning
+                // (iteration will increment, so it won't trigger again)
+                continue;
+            }
+        }
+
         // CHECK FOR TOOL CALLS
         let assistant_msg = &response_body["choices"][0]["message"];
         let tool_calls = assistant_msg.get("tool_calls").and_then(|tc| tc.as_array());
