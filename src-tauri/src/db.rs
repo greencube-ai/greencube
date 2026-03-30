@@ -8,10 +8,15 @@ pub fn init_database(db_path: &Path) -> anyhow::Result<Connection> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL DEFAULT 0);",
     )?;
-    // Insert version 0 if table is empty
+    // Ensure exactly one version row exists
     let count: i64 = conn.query_row("SELECT COUNT(*) FROM schema_version", [], |r| r.get(0))?;
     if count == 0 {
         conn.execute("INSERT INTO schema_version (version) VALUES (0)", [])?;
+    } else if count > 1 {
+        // Fix duplicate rows from earlier bug
+        let current = get_version(&conn)?;
+        conn.execute("DELETE FROM schema_version", [])?;
+        conn.execute("INSERT INTO schema_version (version) VALUES (?1)", rusqlite::params![current])?;
     }
     run_migrations(&conn)?;
     Ok(conn)
@@ -72,9 +77,13 @@ fn run_migrations(conn: &Connection) -> anyhow::Result<()> {
     if version < 9 {
         migrate_v8_to_v9(conn)?;
     }
+    // Repair: ensure all v9 tables exist (some installs have version=9 but missing tables)
+    repair_missing_tables(conn)?;
+
     if version < 10 {
         migrate_v9_to_v10(conn)?;
     }
+
     Ok(())
 }
 
@@ -597,6 +606,63 @@ fn migrate_v8_to_v9(conn: &Connection) -> anyhow::Result<()> {
 
     set_version(conn, 9)?;
     tracing::info!("Database migrated to v9: the cat release");
+    Ok(())
+}
+
+/// Repair: create any tables that should exist but don't (partial migration recovery)
+fn repair_missing_tables(conn: &Connection) -> anyhow::Result<()> {
+    // drives
+    conn.execute_batch(r#"
+        CREATE TABLE IF NOT EXISTS drives (
+            agent_id TEXT NOT NULL,
+            drive_name TEXT NOT NULL,
+            energy REAL NOT NULL DEFAULT 0.0,
+            threshold REAL NOT NULL DEFAULT 1.0,
+            last_discharged_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
+            PRIMARY KEY (agent_id, drive_name),
+            FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+        );
+    "#)?;
+    // curiosities
+    conn.execute_batch(r#"
+        CREATE TABLE IF NOT EXISTS curiosities (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            topic TEXT NOT NULL,
+            source_task_id TEXT,
+            priority INTEGER NOT NULL DEFAULT 1,
+            explored INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_curiosities_agent ON curiosities(agent_id, explored, priority DESC);
+    "#)?;
+    // context_clusters
+    conn.execute_batch(r#"
+        CREATE TABLE IF NOT EXISTS context_clusters (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            cluster_name TEXT NOT NULL,
+            keywords TEXT NOT NULL,
+            task_count INTEGER NOT NULL DEFAULT 1,
+            last_seen_at TEXT NOT NULL,
+            FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+        );
+    "#)?;
+    // relationships
+    conn.execute_batch(r#"
+        CREATE TABLE IF NOT EXISTS relationships (
+            agent_id TEXT NOT NULL,
+            user_identifier TEXT NOT NULL,
+            interactions INTEGER NOT NULL DEFAULT 0,
+            positive_signals INTEGER NOT NULL DEFAULT 0,
+            negative_signals INTEGER NOT NULL DEFAULT 0,
+            notes TEXT NOT NULL DEFAULT '',
+            last_interaction_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z',
+            PRIMARY KEY (agent_id, user_identifier),
+            FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+        );
+    "#)?;
     Ok(())
 }
 
