@@ -12,6 +12,7 @@ export function SettingsPanel() {
   const [saved, setSaved] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     getConfig().then(setConfig);
@@ -28,12 +29,7 @@ export function SettingsPanel() {
     if (!config) return;
     setSaving(true);
     try {
-      // Also update provider in DB
-      try {
-        await createProvider('default', config.llm.api_base_url, config.llm.api_key, config.llm.default_model, 'openai');
-      } catch {
-        // Already exists — saveConfig will sync the key
-      }
+      try { await createProvider('default', config.llm.api_base_url, config.llm.api_key, config.llm.default_model, 'openai'); } catch { /* exists */ }
       await saveConfig(config);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -55,68 +51,88 @@ export function SettingsPanel() {
     });
   };
 
+  const copyGc = () => { navigator.clipboard.writeText('gc'); setCopied(true); setTimeout(() => setCopied(false), 1500); };
+
   return (
     <div className="min-h-screen" style={{ backgroundColor: 'var(--bg-primary)' }}>
-      <div className="max-w-lg mx-auto px-6 py-10">
-        {/* Header */}
-        <div className="flex items-center gap-3 mb-8">
-          <svg width="24" height="24" viewBox="0 0 512 512">
+      <div className="max-w-md mx-auto px-6 py-12">
+
+        {/* Logo */}
+        <div className="flex items-center gap-2.5 mb-10">
+          <svg width="18" height="18" viewBox="0 0 512 512">
             <rect x="64" y="64" width="384" height="384" rx="48" ry="48" fill="none" stroke="#22C55E" strokeWidth="40"/>
           </svg>
-          <h1 className="text-xl font-bold">GreenCube</h1>
-          <span className="text-xs text-[var(--text-muted)] ml-auto font-mono">localhost:{port}</span>
+          <span className="text-sm font-semibold text-[var(--text-muted)]">GreenCube</span>
         </div>
 
-        {/* Status */}
-        <div className="rounded-xl border p-4 mb-8" style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--accent)', borderWidth: 1 }}>
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-2 h-2 rounded-full bg-[var(--accent)]"></div>
-            <span className="text-sm font-medium">Proxy running</span>
+        {/* Status card */}
+        <div className="rounded-xl p-5 mb-10" style={{ background: 'linear-gradient(135deg, rgba(34,197,94,0.06) 0%, rgba(34,197,94,0.02) 100%)', border: '1px solid rgba(34,197,94,0.15)' }}>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#22c55e', boxShadow: '0 0 6px rgba(34,197,94,0.5)' }}></div>
+            <span className="text-sm font-medium" style={{ color: '#22c55e' }}>Running on port {port}</span>
           </div>
-          <p className="text-xs text-[var(--text-muted)]">Your agent is connected. Check what it learned anytime:</p>
-          <code className="text-xs font-mono mt-1 block" style={{ color: 'var(--accent)' }}>curl localhost:{port}/brain</code>
-        </div>
-
-        {/* API Key */}
-        <div className="mb-5">
-          <label className="block text-xs text-[var(--text-muted)] mb-1.5">API Key</label>
-          <div className="flex gap-2">
-            <input type={showKey ? 'text' : 'password'} value={config.llm.api_key}
-              onChange={e => update('llm.api_key', e.target.value)} className="flex-1 font-mono" placeholder="sk-..." />
-            <button onClick={() => setShowKey(!showKey)} className="text-xs text-[var(--text-muted)] px-2">{showKey ? 'hide' : 'show'}</button>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-[var(--text-muted)] mb-1">See what your agent learned:</p>
+              <button onClick={copyGc} className="flex items-center gap-2 group">
+                <code className="text-lg font-mono font-bold" style={{ color: '#22c55e' }}>gc</code>
+                <span className="text-[10px] text-[var(--text-muted)] opacity-0 group-hover:opacity-100 transition-opacity">
+                  {copied ? 'copied' : 'click to copy'}
+                </span>
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* Base URL */}
-        <div className="mb-5">
-          <label className="block text-xs text-[var(--text-muted)] mb-1.5">API Base URL</label>
-          <input type="text" value={config.llm.api_base_url} onChange={e => update('llm.api_base_url', e.target.value)} className="w-full" />
-        </div>
+        {/* Provider config */}
+        <div className="space-y-4 mb-8">
+          <div>
+            <label className="block text-[10px] text-[var(--text-muted)] uppercase tracking-wider mb-1.5">API Key</label>
+            <div className="flex gap-2">
+              <input type={showKey ? 'text' : 'password'} value={config.llm.api_key}
+                onChange={e => update('llm.api_key', e.target.value)}
+                className="flex-1 font-mono text-sm rounded-lg border px-3 py-2"
+                style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border)', color: 'var(--text-primary)' }}
+                placeholder="sk-..." />
+              <button onClick={() => setShowKey(!showKey)}
+                className="text-[10px] text-[var(--text-muted)] px-2 hover:text-[var(--text-primary)] transition-colors">
+                {showKey ? 'hide' : 'show'}
+              </button>
+            </div>
+          </div>
 
-        {/* Model */}
-        <div className="mb-6">
-          <label className="block text-xs text-[var(--text-muted)] mb-1.5">Model</label>
-          <input type="text" value={config.llm.default_model} onChange={e => update('llm.default_model', e.target.value)} className="w-48" />
+          <div>
+            <label className="block text-[10px] text-[var(--text-muted)] uppercase tracking-wider mb-1.5">Base URL</label>
+            <input type="text" value={config.llm.api_base_url} onChange={e => update('llm.api_base_url', e.target.value)}
+              className="w-full text-sm rounded-lg border px-3 py-2"
+              style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border)', color: 'var(--text-primary)' }} />
+          </div>
+
+          <div>
+            <label className="block text-[10px] text-[var(--text-muted)] uppercase tracking-wider mb-1.5">Model</label>
+            <input type="text" value={config.llm.default_model} onChange={e => update('llm.default_model', e.target.value)}
+              className="w-44 text-sm rounded-lg border px-3 py-2"
+              style={{ backgroundColor: 'var(--bg-secondary)', borderColor: 'var(--border)', color: 'var(--text-primary)' }} />
+          </div>
         </div>
 
         {/* Save */}
         <button onClick={handleSave} disabled={saving}
-          className="px-6 py-2.5 rounded-lg text-black font-semibold disabled:opacity-50 hover:brightness-110 transition"
-          style={{ backgroundColor: 'var(--accent)' }}>
+          className="px-6 py-2 rounded-lg text-sm text-black font-semibold disabled:opacity-50 transition-all hover:brightness-110"
+          style={{ backgroundColor: '#22c55e' }}>
           {saving ? 'Saving...' : saved ? 'Saved' : 'Save'}
         </button>
 
         {/* Footer */}
-        <div className="mt-12 pt-6 border-t text-xs text-[var(--text-muted)] space-y-2" style={{ borderColor: 'var(--border)' }}>
-          <div>GreenCube v1.0.0</div>
-          <div>Data: ~/.greencube/</div>
-          <div>Close this window — the proxy keeps running in the system tray.</div>
+        <div className="mt-16 pt-4 border-t space-y-1.5" style={{ borderColor: 'var(--border)' }}>
+          <p className="text-[10px] text-[var(--text-muted)]">Close this window — the proxy keeps running in the system tray.</p>
+          <p className="text-[10px] text-[var(--text-muted)]">v1.0.0 · ~/.greencube/</p>
           <button onClick={async () => {
             if (!confirm('Delete all data and start fresh?')) return;
             const { resetApp } = await import('../lib/invoke');
             await resetApp();
             window.location.reload();
-          }} className="text-[var(--status-error)] hover:underline">Reset all data</button>
+          }} className="text-[10px] text-[var(--status-error)] hover:underline">Reset all data</button>
         </div>
       </div>
 
