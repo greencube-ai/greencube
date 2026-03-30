@@ -51,6 +51,134 @@ use tauri::Manager;
 use tokio::sync::{Mutex, RwLock};
 use tracing_subscriber::EnvFilter;
 
+fn run_terminal_setup(cfg: &mut config::AppConfig) {
+    println!();
+    println!("\x1b[32m\x1b[1m   ╔═╗╦═╗╔═╗╔═╗╔╗╔╔═╗╦ ╦╔╗ ╔═╗\x1b[0m");
+    println!("\x1b[32m\x1b[1m   ║ ╦╠╦╝║╣ ║╣ ║║║║  ║ ║╠╩╗║╣ \x1b[0m");
+    println!("\x1b[32m\x1b[1m   ╚═╝╩╚═╚═╝╚═╝╝╚╝╚═╝╚═╝╚═╝╚═╝\x1b[0m");
+    println!("\x1b[2m   your agent stops repeating mistakes\x1b[0m");
+    println!();
+    println!("  pick your provider:");
+    println!();
+    println!("  \x1b[1m1\x1b[0m  OpenAI          (need API key)");
+    println!("  \x1b[1m2\x1b[0m  OpenClaw        (auto-configure)");
+    println!("  \x1b[1m3\x1b[0m  Ollama          (local, no key needed)");
+    println!("  \x1b[1m4\x1b[0m  OpenRouter      (need API key)");
+    println!("  \x1b[1m5\x1b[0m  LM Studio       (local, no key needed)");
+    println!();
+    print!("  > ");
+    use std::io::Write;
+    std::io::stdout().flush().unwrap_or_default();
+
+    let mut choice = String::new();
+    std::io::stdin().read_line(&mut choice).unwrap_or_default();
+    let choice = choice.trim();
+
+    match choice {
+        "1" => {
+            cfg.llm.api_base_url = "https://api.openai.com/v1".into();
+            cfg.llm.default_model = "gpt-4o".into();
+            println!();
+            print!("  API key: ");
+            std::io::stdout().flush().unwrap_or_default();
+            let mut key = String::new();
+            std::io::stdin().read_line(&mut key).unwrap_or_default();
+            cfg.llm.api_key = key.trim().to_string();
+        }
+        "2" => {
+            // Auto-configure OpenClaw
+            let home = dirs::home_dir().expect("cannot find home dir");
+            let oc_path = home.join(".openclaw").join("openclaw.json");
+            if oc_path.exists() {
+                let content = std::fs::read_to_string(&oc_path).expect("failed to read openclaw config");
+                let mut oc: serde_json::Value = serde_json::from_str(&content).expect("failed to parse openclaw config");
+
+                // Find existing key
+                let mut found_key = String::new();
+                let mut found_model = "gpt-4o".to_string();
+                if let Some(providers) = oc.pointer("/models/providers").and_then(|p| p.as_object()) {
+                    for (_name, provider) in providers {
+                        if let Some(key) = provider["apiKey"].as_str() {
+                            if !key.is_empty() && key != "local" { found_key = key.to_string(); }
+                        }
+                        if let Some(models) = provider["models"].as_array() {
+                            if let Some(first) = models.first() {
+                                if let Some(id) = first["id"].as_str() { found_model = id.to_string(); }
+                            }
+                        }
+                    }
+                }
+
+                // Add greencube provider
+                let gc_provider = serde_json::json!({
+                    "baseUrl": format!("http://localhost:{}/v1", cfg.server.port),
+                    "apiKey": found_key,
+                    "api": "openai-completions",
+                    "models": [{"id": found_model, "name": found_model, "reasoning": false, "input": ["text"], "contextWindow": 128000, "maxTokens": 16384}]
+                });
+                if oc.pointer("/models/providers").is_none() { oc["models"]["providers"] = serde_json::json!({}); }
+                oc["models"]["providers"]["greencube"] = gc_provider;
+                if oc.pointer("/models/mode").is_none() { oc["models"]["mode"] = serde_json::json!("merge"); }
+                let gc_model = format!("greencube/{}", found_model);
+                oc["agents"]["defaults"]["model"]["primary"] = serde_json::json!(gc_model);
+                oc["agents"]["defaults"]["models"][&gc_model] = serde_json::json!({"alias": found_model});
+
+                let pretty = serde_json::to_string_pretty(&oc).expect("failed to serialize");
+                std::fs::write(&oc_path, &pretty).expect("failed to write openclaw config");
+
+                cfg.llm.api_key = found_key;
+                cfg.llm.default_model = found_model;
+                println!();
+                println!("  \x1b[32m\x1b[1mdone.\x1b[0m openclaw configured. run: openclaw daemon restart");
+            } else {
+                println!();
+                println!("  \x1b[31mopenclaw not found.\x1b[0m install it first: npm install -g openclaw");
+                println!("  falling back to manual setup.");
+                println!();
+                print!("  API key: ");
+                std::io::stdout().flush().unwrap_or_default();
+                let mut key = String::new();
+                std::io::stdin().read_line(&mut key).unwrap_or_default();
+                cfg.llm.api_key = key.trim().to_string();
+            }
+        }
+        "3" => {
+            cfg.llm.api_base_url = "http://localhost:11434/v1".into();
+            cfg.llm.api_key = "local".into();
+            cfg.llm.default_model = "llama3".into();
+            println!("  \x1b[32m\x1b[1mdone.\x1b[0m make sure ollama is running.");
+        }
+        "4" => {
+            cfg.llm.api_base_url = "https://openrouter.ai/api/v1".into();
+            cfg.llm.default_model = "openai/gpt-4o".into();
+            println!();
+            print!("  API key: ");
+            std::io::stdout().flush().unwrap_or_default();
+            let mut key = String::new();
+            std::io::stdin().read_line(&mut key).unwrap_or_default();
+            cfg.llm.api_key = key.trim().to_string();
+        }
+        "5" => {
+            cfg.llm.api_base_url = "http://localhost:1234/v1".into();
+            cfg.llm.api_key = "local".into();
+            cfg.llm.default_model = "local-model".into();
+            println!("  \x1b[32m\x1b[1mdone.\x1b[0m make sure lm studio is running.");
+        }
+        _ => {
+            println!("  using default (OpenAI). set your key in ~/.greencube/config.toml");
+        }
+    }
+
+    cfg.ui.onboarding_complete = true;
+    let _ = config::save_config(cfg);
+
+    println!();
+    println!("  \x1b[32m\x1b[1mgreencube is running.\x1b[0m proxy on localhost:{}", cfg.server.port);
+    println!();
+    println!("  type \x1b[32m\x1b[1mgc\x1b[0m to see what your agent learned.");
+    println!();
+}
+
 fn main() {
     let log_dir = config_dir().join("logs");
     let _ = std::fs::create_dir_all(&log_dir);
@@ -60,6 +188,19 @@ fn main() {
         .init();
 
     tracing::info!("Starting GreenCube v1.0.0");
+
+    // Interactive terminal setup on first run
+    let data_dir = config_dir();
+    std::fs::create_dir_all(&data_dir).expect("Failed to create ~/.greencube/");
+    let mut cfg = config::load_config().expect("Failed to load config");
+
+    if !cfg.ui.onboarding_complete {
+        run_terminal_setup(&mut cfg);
+    } else {
+        println!("\x1b[32m\x1b[1m[greencube]\x1b[0m proxy running on localhost:{}", cfg.server.port);
+        println!("\x1b[2mtype gc to see what your agent learned\x1b[0m");
+        println!();
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
