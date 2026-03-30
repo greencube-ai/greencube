@@ -1,6 +1,8 @@
 # GreenCube
 
-your agent learns from every task.
+turn any agent into a persistent agent.
+
+stateless agents forget everything. persistent agents remember, learn, and improve.
 
 ## install
 
