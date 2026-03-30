@@ -71,7 +71,7 @@ export function ChatPanel({ agents, apiPort, hasApiKey }: ChatPanelProps) {
     const timeout = setTimeout(() => controller.abort(), 60000);
 
     try {
-      const resp = await fetch(`http://localhost:${apiPort}/v1/chat/completions`, {
+      const resp = await fetch(`http://127.0.0.1:${apiPort}/v1/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-agent-id': selectedAgentId },
         body: JSON.stringify({

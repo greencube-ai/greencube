@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { saveConfig, createAgent, createProvider, getConfig, getServerInfo, readOpenclawConfig, configureOpenclaw, restartOpenclaw, minimizeToTray } from '../lib/invoke';
+import { saveConfig, getConfig, getServerInfo, readOpenclawConfig, configureOpenclaw, restartOpenclaw, minimizeToTray } from '../lib/invoke';
 import type { AppConfig } from '../lib/types';
 
 type Mode = 'pick' | 'openclaw' | 'openai' | 'ollama' | 'done';
 
 export function OnboardingModal() {
-  const { state, dispatch, refreshAgents } = useApp();
+  const { state } = useApp();
   const [mode, setMode] = useState<Mode>('pick');
   const [apiKey, setApiKey] = useState('');
   const [port, setPort] = useState(9000);
@@ -17,28 +17,15 @@ export function OnboardingModal() {
   useState(() => { getServerInfo().then(info => setPort(info.port)).catch(() => {}); });
 
   const finishSetup = async (key: string, baseUrl: string, model: string) => {
-    try {
-      // Create provider + agent
-      const provider = await createProvider('default', baseUrl, key, model, 'openai');
-      await createAgent('Dev', 'You are a helpful assistant.', ['shell', 'read_file', 'write_file', 'update_context'], provider.id);
-
-      // Save config
-      const config = state.config ?? await getConfig();
-      const updated: AppConfig = {
-        ...config,
-        llm: { ...config.llm, api_key: key, api_base_url: baseUrl, default_model: model },
-        ui: { ...config.ui, onboarding_complete: true },
-      };
-      await saveConfig(updated);
-      dispatch({ type: 'SET_CONFIG', config: updated });
-      await refreshAgents();
-    } catch (e) {
-      // Agent might already exist, that's ok
-      const config = state.config ?? await getConfig();
-      const updated: AppConfig = { ...config, ui: { ...config.ui, onboarding_complete: true } };
-      await saveConfig(updated);
-      dispatch({ type: 'SET_CONFIG', config: updated });
-    }
+    // Save config (this syncs API key to providers table)
+    const config = state.config ?? await getConfig();
+    const updated: AppConfig = {
+      ...config,
+      llm: { ...config.llm, api_key: key, api_base_url: baseUrl, default_model: model },
+      ui: { ...config.ui, onboarding_complete: true },
+    };
+    await saveConfig(updated);
+    // Don't dispatch SET_CONFIG yet — that would re-render to dashboard before hide
   };
 
   const handleOpenclaw = async () => {
@@ -108,7 +95,11 @@ export function OnboardingModal() {
   };
 
   const handleDone = async () => {
+    // Hide window first, THEN update state — prevents dashboard flash
     await minimizeToTray();
+    // Small delay to ensure window is hidden before React re-renders
+    await new Promise(r => setTimeout(r, 200));
+    window.location.reload();
   };
 
   const envLine = `export OPENAI_API_BASE=http://localhost:${port}/v1`;

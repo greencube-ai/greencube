@@ -78,16 +78,22 @@ pub async fn chat_completions(
                 Err(e) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
             }
         } else {
-            match registry::get_agent_by_name(&db, "default") {
-                Ok(Some(a)) => a,
-                Ok(None) => {
-                    let tools = vec!["shell".into(), "read_file".into(), "write_file".into(), "http_get".into()];
-                    match registry::create_agent(&db, "default", "You are a helpful assistant.", &tools) {
-                        Ok(a) => a,
-                        Err(e) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, &format!("failed to create default agent: {}", e)),
+            // No agent ID specified — use first available agent, or create "default"
+            match registry::list_agents(&db) {
+                Ok(agents) if !agents.is_empty() => agents.into_iter().next().expect("checked non-empty"),
+                _ => {
+                    match registry::get_agent_by_name(&db, "default") {
+                        Ok(Some(a)) => a,
+                        Ok(None) => {
+                            let tools = vec!["shell".into(), "read_file".into(), "write_file".into(), "http_get".into()];
+                            match registry::create_agent(&db, "default", "You are a helpful assistant.", &tools) {
+                                Ok(a) => a,
+                                Err(e) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, &format!("failed to create default agent: {}", e)),
+                            }
+                        }
+                        Err(e) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
                     }
                 }
-                Err(e) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
             }
         }
     };
