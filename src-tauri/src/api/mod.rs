@@ -7,6 +7,7 @@ use tower_http::limit::RequestBodyLimitLayer;
 use crate::state::AppState;
 
 pub mod agents;
+pub mod brain;
 pub mod completions;
 pub mod health;
 
@@ -43,6 +44,11 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/v1/agents/{id}/episodes", get(agents::get_episodes))
         // Audit
         .route("/v1/agents/{id}/audit", get(agents::get_audit_log))
+        // Human-readable brain endpoints (plain text, curl-friendly)
+        .route("/brain", get(brain::brain))
+        .route("/brain/{index}", get(brain::brain_by_index))
+        .route("/status", get(brain::status))
+        .route("/log", get(brain::log))
         .layer(cors)
         .layer(RequestBodyLimitLayer::new(10 * 1024 * 1024)) // 10MB
         .with_state(state)
