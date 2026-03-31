@@ -218,9 +218,10 @@ export function OnboardingModal() {
               </div>
             )}
 
-            <div className="rounded-lg border p-3 mb-6 text-left" style={{ backgroundColor: 'var(--bg-tertiary)', borderColor: 'var(--border)' }}>
-              <p className="text-[10px] text-[var(--text-muted)] mb-1">Check on your agent anytime:</p>
-              <code className="text-xs font-mono text-[var(--text-muted)]">curl localhost:{port}/brain</code>
+            <div className="rounded-lg border p-4 mb-6 text-left" style={{ backgroundColor: 'rgba(34,197,94,0.04)', borderColor: 'rgba(34,197,94,0.15)' }}>
+              <p className="text-[10px] mb-2" style={{ color: '#71717a' }}>Check on your agent anytime:</p>
+              <code className="text-xl font-mono font-bold block mb-1" style={{ color: '#22c55e' }}>gc</code>
+              <p className="text-[10px] font-mono" style={{ color: '#52525b' }}>or: curl localhost:{port}/brain</p>
             </div>
 
             <button onClick={handleDone}
