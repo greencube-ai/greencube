@@ -79,6 +79,9 @@ const JUNK_KNOWLEDGE: &[&str] = &[
     "requires further inv",
     "for later analysis",
     "for detailed",
+    "investigate the",
+    "identify and resolve",
+    "improving overall",
 ];
 
 fn is_junk_knowledge(content: &str) -> bool {

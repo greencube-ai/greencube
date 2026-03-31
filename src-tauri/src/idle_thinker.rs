@@ -20,6 +20,9 @@ fn is_idle_junk(text: &str) -> bool {
         "no context or goals", "limits my abi", "enhancing my built-in",
         "i don't have any information", "i don't know", "i cannot",
         "no information available",
+        "investigate the",
+        "identify and resolve",
+        "improving overall",
     ];
     junk.iter().any(|p| lower.contains(p))
 }
