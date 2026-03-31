@@ -683,8 +683,14 @@ fn migrate_v9_to_v10(conn: &Connection) -> anyhow::Result<()> {
         [],
     )?;
 
+    // Add missing indexes for frequently queried tables
+    conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_ratings_agent ON response_ratings(agent_id, created_at DESC);")?;
+    conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_clusters_agent ON context_clusters(agent_id);")?;
+    conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_knowledge_category ON knowledge(agent_id, category);")?;
+    conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_knowledge_stale ON knowledge(agent_id, stale);")?;
+
     set_version(conn, 10)?;
-    tracing::info!("Database migrated to v10: memory decay, social drive fix, knowledge enabled");
+    tracing::info!("Database migrated to v10: memory decay, social drive fix, knowledge enabled, indexes added");
     Ok(())
 }
 
