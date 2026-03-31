@@ -93,29 +93,32 @@ fn is_junk_knowledge(content: &str) -> bool {
 
 async fn render_brain(state: &AppState, agent: &crate::identity::Agent) -> String {
     let budget = state.config.read().await.cost.daily_background_token_budget;
-    let db = state.db.lock().await;
 
-    let mood = crate::mood::get_mood(&db, &agent.id);
-    let success_pct = if agent.total_tasks > 0 {
-        (agent.successful_tasks as f64 / agent.total_tasks as f64 * 100.0) as i64
-    } else { 0 };
+    // Grab ALL data in one brief lock, then drop immediately
+    let (mood, success_pct, budget_ok, bg_tokens, knowledge, competence, episodes, mistakes_prevented, facts_used, corrections_applied) = {
+        let db = state.db.lock().await;
+        let mood = crate::mood::get_mood(&db, &agent.id);
+        let sp = if agent.total_tasks > 0 { (agent.successful_tasks as f64 / agent.total_tasks as f64 * 100.0) as i64 } else { 0 };
+        let bok = crate::token_usage::has_budget_remaining(&db, &agent.id, 0, budget).unwrap_or(true);
+        let bt = crate::token_usage::get_background_usage_today(&db, &agent.id).unwrap_or(0);
+        let k = crate::knowledge::list_knowledge(&db, &agent.id, 50).unwrap_or_default();
+        let c = crate::competence::get_competence_map(&db, &agent.id).unwrap_or_default();
+        let e = crate::memory::episodic::get_episodes(&db, &agent.id, 50, None).unwrap_or_default();
+        let mp = get_counter(&db, &agent.id, "mistakes_prevented");
+        let fu = get_counter(&db, &agent.id, "facts_used");
+        let ca = get_counter(&db, &agent.id, "corrections_applied");
+        (mood, sp, bok, bt, k, c, e, mp, fu, ca)
+    };
+    // DB lock released — formatting below never blocks other requests
 
-    let budget_ok = crate::token_usage::has_budget_remaining(&db, &agent.id, 0, budget).unwrap_or(true);
-    let bg_tokens = crate::token_usage::get_background_usage_today(&db, &agent.id).unwrap_or(0);
     let bg_cost = bg_tokens as f64 / 1000.0 * 0.01;
 
-    // Knowledge — filter out junk, failures, corrections, stale
-    let knowledge = crate::knowledge::list_knowledge(&db, &agent.id, 50).unwrap_or_default();
     let clean_facts: Vec<_> = knowledge.iter()
         .filter(|k| !k.stale)
         .filter(|k| k.category == "fact" || k.category == "preference" || k.category == "skill" || k.category == "synthesis")
         .filter(|k| !is_junk_knowledge(&k.content))
         .collect();
 
-    let competence = crate::competence::get_competence_map(&db, &agent.id).unwrap_or_default();
-
-    // Recent: only task_start episodes, deduplicated
-    let episodes = crate::memory::episodic::get_episodes(&db, &agent.id, 50, None).unwrap_or_default();
     let mut seen_tasks: std::collections::HashSet<String> = std::collections::HashSet::new();
     let task_starts: Vec<_> = episodes.iter()
         .filter(|ep| ep.event_type == "task_start")
@@ -127,27 +130,18 @@ async fn render_brain(state: &AppState, agent: &crate::identity::Agent) -> Strin
         .take(5)
         .collect();
 
-    // Match each task_start with its task_end for outcome
     let task_outcomes: Vec<(String, String, String)> = task_starts.iter().map(|ep| {
         let prompt = ep.summary.replace("Task started: ", "");
         let prompt_short: String = prompt.chars().take(50).collect();
         let prompt_display = if prompt.chars().count() > 50 { format!("{}...", prompt_short) } else { prompt_short };
-
         let outcome = if let Some(ref tid) = ep.task_id {
             episodes.iter()
                 .find(|e| e.event_type == "task_end" && e.task_id.as_deref() == Some(tid))
                 .and_then(|e| e.outcome.clone())
                 .unwrap_or_else(|| "pending".to_string())
         } else { "unknown".to_string() };
-
         (ep.created_at.clone(), prompt_display, outcome)
     }).collect();
-
-    let mistakes_prevented = get_counter(&db, &agent.id, "mistakes_prevented");
-    let facts_used = get_counter(&db, &agent.id, "facts_used");
-    let corrections_applied = get_counter(&db, &agent.id, "corrections_applied");
-
-    drop(db);
 
     let mut out = String::new();
 
