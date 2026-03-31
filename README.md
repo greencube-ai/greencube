@@ -84,9 +84,14 @@ greencube runs a local proxy on your machine (localhost:9000). your agent talks 
 - MIT license
 - free forever, no account, no telemetry
 
-## GUI
+## app
 
-greencube also includes a desktop app with a dashboard, agent details, knowledge browser, and activity feed. it runs in the system tray. but you never need to open it — the terminal endpoints above are the full experience.
+greencube includes a settings app for changing your provider, API key, and model. it runs in the system tray. close the window anytime — the proxy keeps running.
+
+## support
+
+- [GitHub Discussions](https://github.com/greencube-ai/greencube/discussions) — questions, feedback, feature requests
+- [GitHub Issues](https://github.com/greencube-ai/greencube/issues) — bug reports
 
 [greencube.world](https://greencube.world)
 
