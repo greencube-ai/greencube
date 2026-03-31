@@ -68,6 +68,12 @@ const JUNK_KNOWLEDGE: &[&str] = &[
     "i do not have",
     "store the observation that there is no",
     "enhancing my built-in",
+    "failed in unknown",
+    "failed in context",
+    "failed in general",
+    "unresolved issue",
+    "needs investig",
+    "warning suggests",
 ];
 
 fn is_junk_knowledge(content: &str) -> bool {
@@ -104,10 +110,10 @@ async fn render_brain(state: &AppState, agent: &crate::identity::Agent) -> Strin
     let competence = crate::competence::get_competence_map(&db, &agent.id).unwrap_or_default();
 
     // Recent: only task_start episodes, deduplicated
-    let episodes = crate::memory::episodic::get_episodes(&db, &agent.id, 30, None).unwrap_or_default();
+    let episodes = crate::memory::episodic::get_episodes(&db, &agent.id, 50, None).unwrap_or_default();
     let mut seen_tasks: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let recent_tasks: Vec<_> = episodes.iter()
-        .filter(|ep| ep.event_type == "task_start" || ep.event_type == "task_end")
+    let task_starts: Vec<_> = episodes.iter()
+        .filter(|ep| ep.event_type == "task_start")
         .filter(|ep| {
             if let Some(ref tid) = ep.task_id {
                 seen_tasks.insert(tid.clone())
@@ -116,8 +122,8 @@ async fn render_brain(state: &AppState, agent: &crate::identity::Agent) -> Strin
         .take(5)
         .collect();
 
-    // Match task_start with task_end to get outcomes
-    let task_outcomes: Vec<(String, String, String)> = recent_tasks.iter().map(|ep| {
+    // Match each task_start with its task_end for outcome
+    let task_outcomes: Vec<(String, String, String)> = task_starts.iter().map(|ep| {
         let prompt = ep.summary.replace("Task started: ", "");
         let prompt_short: String = prompt.chars().take(50).collect();
         let prompt_display = if prompt.chars().count() > 50 { format!("{}...", prompt_short) } else { prompt_short };
