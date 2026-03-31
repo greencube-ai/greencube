@@ -229,7 +229,7 @@ export function OnboardingModal() {
               style={{ backgroundColor: 'var(--accent)' }}>
               Go to Dashboard
             </button>
-            <p className="text-[10px] text-[var(--text-muted)] mt-3">GreenCube runs in the background. Close the window anytime — the proxy stays alive in the system tray.</p>
+            <p className="text-xs mt-3" style={{ color: '#71717a' }}>Close this window anytime. GreenCube keeps running in the system tray.</p>
           </div>
         )}
       </div>
