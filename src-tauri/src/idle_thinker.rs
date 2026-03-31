@@ -10,6 +10,20 @@ use crate::state::AppState;
 
 const MAX_IDLE_NOTIFICATIONS_PER_DAY: i64 = 3;
 
+/// Filter out idle thoughts that are just the agent talking about its own internals
+fn is_idle_junk(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    let junk = [
+        "failed in unknown", "failed in context", "failed in general",
+        "store an observation", "store the observation",
+        "unresolved issue", "needs investig", "warning suggests",
+        "no context or goals", "limits my abi", "enhancing my built-in",
+        "i don't have any information", "i don't know", "i cannot",
+        "no information available",
+    ];
+    junk.iter().any(|p| lower.contains(p))
+}
+
 /// Main idle thinking loop. Spawned from main.rs.
 pub async fn run_idle_thinker(state: Arc<AppState>) {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
@@ -313,7 +327,10 @@ One action only. Make it count."#,
                                 }
                                 "[insight]" => {
                                     let _ = insert_thought(&db, &agent.id, text, "insight");
-                                    let _ = knowledge::insert_knowledge(&db, &agent.id, text, "fact", None);
+                                    // Quality check: don't store junk as knowledge
+                                    if !is_idle_junk(text) && text.split_whitespace().count() >= 5 {
+                                        let _ = knowledge::insert_knowledge(&db, &agent.id, text, "fact", None);
+                                    }
                                 }
                                 "[question]" => {
                                     let _ = insert_thought(&db, &agent.id, text, "question");
@@ -323,7 +340,9 @@ One action only. Make it count."#,
                                 }
                                 "[synthesis]" => {
                                     let _ = insert_thought(&db, &agent.id, text, "synthesis");
-                                    let _ = knowledge::insert_knowledge(&db, &agent.id, text, "synthesis", None);
+                                    if !is_idle_junk(text) && text.split_whitespace().count() >= 5 {
+                                        let _ = knowledge::insert_knowledge(&db, &agent.id, text, "synthesis", None);
+                                    }
                                     tracing::info!("Knowledge synthesis: agent {} created: {}", agent.id, &text[..text.len().min(80)]);
                                 }
                                 "[explore]" => {

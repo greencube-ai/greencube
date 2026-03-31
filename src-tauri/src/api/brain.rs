@@ -66,7 +66,8 @@ const JUNK_KNOWLEDGE: &[&str] = &[
     "there is no context",
     "limits my abi",
     "i do not have",
-    "store the observation that there is no",
+    "store the observation",
+    "store an observation",
     "enhancing my built-in",
     "failed in unknown",
     "failed in context",
@@ -74,6 +75,10 @@ const JUNK_KNOWLEDGE: &[&str] = &[
     "unresolved issue",
     "needs investig",
     "warning suggests",
+    "warning is an unresolved",
+    "requires further inv",
+    "for later analysis",
+    "for detailed",
 ];
 
 fn is_junk_knowledge(content: &str) -> bool {
