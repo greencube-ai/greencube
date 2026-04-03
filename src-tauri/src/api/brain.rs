@@ -282,6 +282,72 @@ pub async fn log(State(state): State<Arc<AppState>>) -> String {
     if out.is_empty() { "no activity yet.\n".to_string() } else { out }
 }
 
+/// POST /feedback — rate a task from the terminal
+/// Body: {"task_id": "latest", "rating": "down"} or {"task_id": "abc-123", "rating": "up"}
+pub async fn feedback(
+    State(state): State<Arc<AppState>>,
+    axum::Json(body): axum::Json<serde_json::Value>,
+) -> String {
+    let rating = body["rating"].as_str().unwrap_or("up");
+    let task_id_input = body["task_id"].as_str().unwrap_or("latest");
+
+    let db = state.db.lock().await;
+    let agents = registry::list_agents(&db).unwrap_or_default();
+    if agents.is_empty() {
+        return "no agents yet.\n".to_string();
+    }
+    let agent = &agents[0];
+
+    // Resolve "latest" to actual task_id
+    let task_id = if task_id_input == "latest" {
+        crate::memory::episodic::get_episodes(&db, &agent.id, 1, None)
+            .ok()
+            .and_then(|eps| eps.into_iter().find(|e| e.event_type == "task_start"))
+            .and_then(|e| e.task_id)
+            .unwrap_or_default()
+    } else {
+        task_id_input.to_string()
+    };
+
+    if task_id.is_empty() {
+        return "no tasks found to rate.\n".to_string();
+    }
+
+    if rating == "down" {
+        // Find the task summary
+        let task_summary = crate::memory::episodic::get_episodes(&db, &agent.id, 20, Some(&task_id))
+            .unwrap_or_default()
+            .into_iter()
+            .find(|e| e.event_type == "task_start")
+            .map(|e| e.summary.replace("Task started: ", ""))
+            .unwrap_or_else(|| "unknown task".to_string());
+
+        let domain = crate::competence::get_most_recent_domain(&db, &agent.id).ok().flatten().unwrap_or_else(|| "general".to_string());
+
+        // Store correction
+        let _ = crate::knowledge::insert_knowledge(
+            &db, &agent.id,
+            &format!("CORRECTION [{}]: User rejected response about '{}'. Do not repeat this approach.", domain, task_summary),
+            "correction", Some(&task_id),
+        );
+
+        // Lower competence
+        let _ = crate::competence::update_competence(&db, &agent.id, &domain, false, None);
+
+        // Track relationship signal
+        let _ = crate::relationships::record_signal(&db, &agent.id, "default_user", false);
+
+        // Rate in DB
+        let _ = crate::ratings::rate_response(&db, &agent.id, &task_id, -1);
+
+        format!("thumbs down recorded for \"{}\". your agent will avoid this approach.\n", task_summary.chars().take(50).collect::<String>())
+    } else {
+        let _ = crate::ratings::rate_response(&db, &agent.id, &task_id, 1);
+        let _ = crate::relationships::record_signal(&db, &agent.id, "default_user", true);
+        "thumbs up recorded.\n".to_string()
+    }
+}
+
 // --- Counter helpers ---
 
 fn get_counter(conn: &rusqlite::Connection, agent_id: &str, name: &str) -> i64 {

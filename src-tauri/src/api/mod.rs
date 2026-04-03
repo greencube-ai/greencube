@@ -51,6 +51,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/b/{index}", get(brain::brain_by_index))
         .route("/status", get(brain::status))
         .route("/log", get(brain::log))
+        .route("/feedback", post(brain::feedback))
         .layer(cors)
         .layer(RequestBodyLimitLayer::new(10 * 1024 * 1024)) // 10MB
         .with_state(state)
