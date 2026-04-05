@@ -29,7 +29,7 @@ pub async fn brain(State(state): State<Arc<AppState>>) -> Response {
             crate::mood::get_mood(&db, &agent.id)
         };
         out.push_str(&format!(
-            "{}. {} ({} tasks, mood: {})\n",
+            "{}. {} ({} tasks, state: {})\n",
             i + 1, agent.name, agent.total_tasks, mood
         ));
     }
@@ -149,7 +149,7 @@ async fn render_brain(state: &AppState, agent: &crate::identity::Agent) -> Strin
     let mut out = String::new();
 
     // Header
-    out.push_str(&format!("\u{1F9E0} {} | mood: {} | {} tasks | {}% success\n", agent.name, mood, agent.total_tasks, success_pct));
+    out.push_str(&format!("\u{1F9E0} {} | state: {} | {} tasks | {}% success\n", agent.name, mood, agent.total_tasks, success_pct));
     if !budget_ok {
         out.push_str("   learning paused (daily budget reached, resumes tomorrow)\n");
     }
@@ -233,7 +233,7 @@ pub async fn status(State(state): State<Arc<AppState>>) -> String {
 
     if agents.len() == 1 {
         let mood = crate::mood::get_mood(&db, &agents[0].id);
-        format!("running | {} tasks | {} facts learned | mood: {} | overhead today: ~${:.3}\n", total_tasks, total_knowledge, mood, bg_cost)
+        format!("running | {} tasks | {} facts learned | state: {} | overhead today: ~${:.3}\n", total_tasks, total_knowledge, mood, bg_cost)
     } else {
         format!("running | {} agents | {} tasks | {} facts learned | overhead today: ~${:.3}\n", agents.len(), total_tasks, total_knowledge, bg_cost)
     }
