@@ -359,6 +359,7 @@ fn main() {
             commands::read_openclaw_config,
             commands::configure_openclaw,
             commands::restart_openclaw,
+            commands::set_env_permanently,
             commands::minimize_to_tray,
         ])
         .on_window_event(|window, event| {

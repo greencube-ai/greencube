@@ -1,9 +1,16 @@
 import { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { saveConfig, createProvider, getConfig, getServerInfo, readOpenclawConfig, configureOpenclaw, restartOpenclaw } from '../lib/invoke';
+import { saveConfig, createProvider, getConfig, getServerInfo, readOpenclawConfig, configureOpenclaw, restartOpenclaw, setEnvPermanently } from '../lib/invoke';
 import type { AppConfig } from '../lib/types';
 
 type Mode = 'pick' | 'openclaw' | 'openai' | 'ollama' | 'done';
+
+function detectOS(): 'windows' | 'mac' | 'linux' {
+  const ua = navigator.userAgent.toLowerCase();
+  if (ua.includes('win')) return 'windows';
+  if (ua.includes('mac')) return 'mac';
+  return 'linux';
+}
 
 export function OnboardingModal() {
   const { state } = useApp();
@@ -13,6 +20,9 @@ export function OnboardingModal() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState('');
+  const [envSet, setEnvSet] = useState(false);
+  const [envLoading, setEnvLoading] = useState(false);
+  const os = detectOS();
 
   useState(() => { getServerInfo().then(info => setPort(info.port)).catch(() => {}); });
 
@@ -104,7 +114,22 @@ export function OnboardingModal() {
     window.location.reload();
   };
 
-  const envLine = `export OPENAI_API_BASE=http://localhost:${port}/v1`;
+  const envValue = `http://localhost:${port}/v1`;
+  const envLine = os === 'windows'
+    ? `$env:OPENAI_API_BASE = "${envValue}"`
+    : `export OPENAI_API_BASE=${envValue}`;
+
+  const handleSetEnvPermanently = async () => {
+    setEnvLoading(true);
+    try {
+      await setEnvPermanently(envValue);
+      setEnvSet(true);
+    } catch {
+      // Silently fail — user can do it manually
+    } finally {
+      setEnvLoading(false);
+    }
+  };
 
   return (
     <div className="flex items-center justify-center min-h-screen p-4" style={{ backgroundColor: 'var(--bg-primary)' }}>
@@ -212,9 +237,22 @@ export function OnboardingModal() {
 
             {/* Non-OpenClaw: show env var */}
             {!result.includes('Configured') && (
-              <div className="rounded-lg border p-3 mb-4 text-left" style={{ backgroundColor: 'var(--bg-tertiary)', borderColor: 'var(--border)' }}>
-                <p className="text-[10px] text-[var(--text-muted)] mb-1">Add this line before running your agent:</p>
-                <code className="text-xs font-mono" style={{ color: 'var(--accent)' }}>{envLine}</code>
+              <div className="mb-4">
+                <div className="rounded-lg border p-3 text-left" style={{ backgroundColor: 'var(--bg-tertiary)', borderColor: 'var(--border)' }}>
+                  <p className="text-[10px] text-[var(--text-muted)] mb-1">Add this line before running your agent:</p>
+                  <code className="text-xs font-mono break-all" style={{ color: 'var(--accent)' }}>{envLine}</code>
+                </div>
+                {!envSet ? (
+                  <button onClick={handleSetEnvPermanently} disabled={envLoading}
+                    className="w-full mt-2 py-2 rounded-lg text-sm font-medium border transition-colors"
+                    style={{ borderColor: 'var(--accent)', color: 'var(--accent)', backgroundColor: 'rgba(34,197,94,0.04)' }}>
+                    {envLoading ? 'Setting...' : 'Set it permanently'}
+                  </button>
+                ) : (
+                  <div className="mt-2 py-2 rounded-lg text-sm font-medium text-center" style={{ color: 'var(--accent)' }}>
+                    {'\u2713'} Done. Restart your terminal.
+                  </div>
+                )}
               </div>
             )}
 

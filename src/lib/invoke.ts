@@ -169,6 +169,10 @@ export async function restartOpenclaw(): Promise<string> {
   return invoke<string>('restart_openclaw');
 }
 
+export async function setEnvPermanently(value: string): Promise<string> {
+  return invoke<string>('set_env_permanently', { value });
+}
+
 export async function minimizeToTray(): Promise<void> {
   return invoke<void>('minimize_to_tray');
 }

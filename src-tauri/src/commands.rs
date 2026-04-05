@@ -565,6 +565,49 @@ pub async fn restart_openclaw() -> Result<String> {
     }
 }
 
+/// Persist OPENAI_API_BASE env var across sessions
+#[tauri::command]
+pub async fn set_env_permanently(value: String) -> Result<String> {
+    if cfg!(target_os = "windows") {
+        // Windows: set user-level env var via PowerShell
+        let script = format!(
+            r#"[System.Environment]::SetEnvironmentVariable("OPENAI_API_BASE", "{}", "User")"#,
+            value
+        );
+        let output = tokio::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", &script])
+            .output()
+            .await
+            .map_err(|e| GreenCubeError::Internal(format!("failed to run powershell: {}", e)))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(GreenCubeError::Internal(format!("powershell failed: {}", stderr)));
+        }
+        Ok("windows".to_string())
+    } else {
+        // macOS/Linux: append to shell rc files if not already present
+        let home = std::env::var("HOME")
+            .map_err(|_| GreenCubeError::Internal("HOME not set".to_string()))?;
+        let export_line = format!("export OPENAI_API_BASE=\"{}\"", value);
+        let mut updated = Vec::new();
+
+        for rc in &[".zshrc", ".bashrc"] {
+            let path = std::path::PathBuf::from(&home).join(rc);
+            if path.exists() {
+                let contents = tokio::fs::read_to_string(&path).await
+                    .map_err(|e| GreenCubeError::Internal(format!("failed to read {}: {}", rc, e)))?;
+                if !contents.contains("OPENAI_API_BASE") {
+                    let append = format!("\n# GreenCube proxy\n{}\n", export_line);
+                    tokio::fs::write(&path, format!("{}{}", contents, append)).await
+                        .map_err(|e| GreenCubeError::Internal(format!("failed to write {}: {}", rc, e)))?;
+                    updated.push(rc.to_string());
+                }
+            }
+        }
+        Ok(format!("unix:{}", updated.join(",")))
+    }
+}
+
 /// Minimize the main window to tray
 #[tauri::command]
 pub async fn minimize_to_tray(app: tauri::AppHandle) -> Result<()> {
