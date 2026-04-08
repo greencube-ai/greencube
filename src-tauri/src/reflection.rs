@@ -12,20 +12,17 @@ You MUST format each learning as EXACTLY one of these tags on its own line:
 [fact valence=N] statement here
 [warning valence=N] statement here
 [preference] statement here
-[curious] a question or topic you want to explore later (something interesting from this task)
 [domain] one-word category of this task (e.g., python, css, database, api, devops)
 [context] brief note for your scratchpad
 
 Valence is your emotional memory: -2=very frustrating, -1=difficult, 0=neutral, +1=went well, +2=excellent.
 Do NOT number the items. Just the tags, one per line.
 Always include exactly one [domain] tag.
-If something in this conversation made you curious, include a [curious] tag.
 If nothing was learned, write only: NONE
 
 Example output:
 [fact valence=1] The user's API uses Bearer token authentication
 [warning valence=-2] The /v2 endpoint returns 404 and was very frustrating to debug
-[curious] what happens when JWT tokens expire mid-request?
 [domain] api
 [context] Working on payment integration, auth is done"#;
 
@@ -172,9 +169,7 @@ async fn run_reflection(
     let mut stored = 0;
     for (category, entry_content, valence) in &knowledge_entries {
         if category == "curious" {
-            let _ = crate::curiosity::add_curiosity(&db, agent_id, entry_content, Some(task_id));
-            stored += 1;
-            continue;
+            continue; // curiosity queue disconnected
         }
 
         // Quality check 1: skip entries shorter than 5 words (too vague)
@@ -238,12 +233,6 @@ async fn run_reflection(
     // Update context cluster for this domain
     if let Some(ref d) = domain {
         let _ = crate::context_clusters::update_cluster(&db, agent_id, d);
-    }
-
-    // Charge curiosity drive if [curious] entries were extracted
-    let curious_count = knowledge_entries.iter().filter(|(c, _, _)| c == "curious").count();
-    if curious_count > 0 {
-        let _ = crate::drives::charge_drive(&db, agent_id, "curiosity", 0.3 * curious_count as f64);
     }
 
     // Update competence + task patterns for this domain
