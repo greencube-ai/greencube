@@ -1091,7 +1091,7 @@ async fn run_post_task(
         if should_reflect {
             crate::reflection::spawn_reflection(
                 state.clone(), agent_id.to_string(), provider.clone(),
-                msgs.to_vec(), task_id.to_string(),
+                msgs.to_vec(), task_id.to_string(), success,
             );
         }
 
@@ -1099,7 +1099,7 @@ async fn run_post_task(
         if !success && !should_reflect && reflection_enabled && msgs.len() >= 2 {
             crate::reflection::spawn_reflection(
                 state.clone(), agent_id.to_string(), provider.clone(),
-                msgs.to_vec(), task_id.to_string(),
+                msgs.to_vec(), task_id.to_string(), success,
             );
         }
 

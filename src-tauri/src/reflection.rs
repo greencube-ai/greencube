@@ -33,9 +33,10 @@ pub fn spawn_reflection(
     provider: Provider,
     messages: Vec<serde_json::Value>,
     task_id: String,
+    success: bool,
 ) {
     tokio::spawn(async move {
-        if let Err(e) = run_reflection(&state, &agent_id, &provider, &messages, &task_id).await {
+        if let Err(e) = run_reflection(&state, &agent_id, &provider, &messages, &task_id, success).await {
             tracing::warn!("Reflection failed for agent {}: {}", agent_id, e);
         }
     });
@@ -47,6 +48,7 @@ async fn run_reflection(
     provider: &Provider,
     messages: &[serde_json::Value],
     task_id: &str,
+    success: bool,
 ) -> anyhow::Result<()> {
     // Budget check: skip if daily background token budget exceeded
     // Read config BEFORE db lock to avoid deadlock
@@ -237,9 +239,9 @@ async fn run_reflection(
 
     // Update competence + task patterns for this domain
     if let Some(ref d) = domain {
-        let _ = crate::competence::update_competence(&db, agent_id, d, true, None);
+        let _ = crate::competence::update_competence(&db, agent_id, d, success, None);
         let _ = crate::task_patterns::record_task_timing(&db, agent_id, d);
-        tracing::info!("Competence updated: agent {} domain '{}' (success)", agent_id, d);
+        tracing::info!("Competence updated: agent {} domain '{}' (success={})", agent_id, d, success);
     }
 
     // Log the reflection as an episode
