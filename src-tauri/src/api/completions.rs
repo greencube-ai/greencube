@@ -868,7 +868,8 @@ async fn stream_llm_response(
         .to_string();
 
     if !content_type.contains("text/event-stream") {
-        // LLM returned JSON, not SSE — handle as non-streaming
+        // LLM returned JSON, not SSE — handle as non-streaming fallback.
+        // Log LLM response episode, then delegate to run_post_task for all side effects.
         match llm_response.json::<serde_json::Value>().await {
             Ok(response_body) => {
                 let content = response_body["choices"][0]["message"]["content"].as_str().unwrap_or("").to_string();
@@ -890,25 +891,10 @@ async fn stream_llm_response(
                         permission_result: "allowed".into(),
                         result: None, duration_ms: None, cost_cents: 0, error: None,
                     });
-                    let _ = registry::update_agent_status(&db, agent_id, "idle");
-                    let _ = registry::increment_task_counts(&db, agent_id, true, 0);
-                    let _ = episodic::insert_episode(&db, &Episode {
-                        id: uuid::Uuid::new_v4().to_string(), agent_id: agent_id.into(),
-                        created_at: chrono::Utc::now().to_rfc3339(), event_type: "task_end".into(),
-                        summary: "Task completed successfully".into(), raw_data: None,
-                        task_id: Some(task_id.into()), outcome: Some("success".into()),
-                        tokens_used: 0, cost_cents: 0,
-                    });
-                    let _ = audit::log_action(&db, &AuditEntry {
-                        id: uuid::Uuid::new_v4().to_string(), agent_id: agent_id.into(),
-                        created_at: chrono::Utc::now().to_rfc3339(), action_type: "task_end".into(),
-                        action_detail: "Task completed successfully".into(),
-                        permission_result: "allowed".into(),
-                        result: None, duration_ms: None, cost_cents: 0, error: None,
-                    });
                 }
-                emit_status(&state, agent_id, "idle");
-                emit_refresh(&state);
+                // Streaming path is gated on !has_tools, so success=true is correct here.
+                let msgs: Vec<serde_json::Value> = body["messages"].as_array().cloned().unwrap_or_default();
+                run_post_task(state.clone(), agent_id, task_id, true, 0, Some(provider), Some(&msgs)).await;
                 return Json(response_body).into_response();
             }
             Err(e) => {
@@ -955,7 +941,9 @@ async fn stream_llm_response(
                     // cannot be invoked here and there is nothing to fail. If
                     // streaming tool support is ever added, this must become a
                     // real success check like the non-streaming path.
-                    // Log the accumulated response
+
+                    // Log the LLM response episode (specific to streaming — run_post_task
+                    // handles task_end episode, drives, mood, reflection, etc.)
                     {
                         let db = state_clone.db.lock().await;
                         let summary = format!("LLM: {}", accumulated_content.chars().take(200).collect::<String>());
@@ -973,82 +961,12 @@ async fn stream_llm_response(
                             permission_result: "allowed".into(),
                             result: None, duration_ms: None, cost_cents: 0, error: None,
                         });
-                        let _ = registry::update_agent_status(&db, &agent_id_owned, "idle");
-                        let _ = registry::increment_task_counts(&db, &agent_id_owned, true, 0);
-                        let _ = episodic::insert_episode(&db, &Episode {
-                            id: uuid::Uuid::new_v4().to_string(), agent_id: agent_id_owned.clone(),
-                            created_at: chrono::Utc::now().to_rfc3339(), event_type: "task_end".into(),
-                            summary: "Task completed successfully".into(), raw_data: None,
-                            task_id: Some(task_id_owned.clone()), outcome: Some("success".into()),
-                            tokens_used: 0, cost_cents: 0,
-                        });
-                        let _ = audit::log_action(&db, &AuditEntry {
-                            id: uuid::Uuid::new_v4().to_string(), agent_id: agent_id_owned.clone(),
-                            created_at: chrono::Utc::now().to_rfc3339(), action_type: "task_end".into(),
-                            action_detail: "Task completed successfully".into(),
-                            permission_result: "allowed".into(),
-                            result: None, duration_ms: None, cost_cents: 0, error: None,
-                        });
-                    }
-                    if let Some(handle) = &state_clone.app_handle {
-                        let _ = handle.emit("agent-status-change", serde_json::json!({"id": agent_id_owned, "status": "idle"}));
-                        let _ = handle.emit("activity-refresh", ());
                     }
 
-                    // Record growth metrics
-                    {
-                        let db = state_clone.db.lock().await;
-                        let _ = crate::metrics::record_metric(&db, &agent_id_owned);
-                    }
-
-                    // Trigger background features — always on
-                    let config = state_clone.config.read().await;
-                    let reflection_enabled = config.llm.self_reflection_enabled;
-                    drop(config);
-
-                    {
-                        let (total_tasks, active_goal_count) = {
-                            let db = state_clone.db.lock().await;
-                            let total = registry::get_agent(&db, &agent_id_owned).ok().flatten().map(|a| a.total_tasks).unwrap_or(0);
-                            let goals = crate::goals::count_active_goals(&db, &agent_id_owned).unwrap_or(0);
-                            (total, goals)
-                        };
-
-                        let should_reflect = reflection_enabled && original_messages.len() >= 2
-                            && (total_tasks <= 5 || total_tasks % 3 == 0);
-
-                        if should_reflect {
-                            crate::reflection::spawn_reflection(
-                                state_clone.clone(), agent_id_owned.clone(), provider_clone.clone(),
-                                original_messages.clone(), task_id_owned.clone(),
-                            );
-                        }
-
-                        crate::profile::maybe_regenerate(
-                            state_clone.clone(), agent_id_owned.clone(), provider_clone.clone(), total_tasks,
-                        );
-
-                        crate::goals::maybe_generate_goals(
-                            state_clone.clone(), agent_id_owned.clone(), provider_clone.clone(),
-                            total_tasks, active_goal_count,
-                        );
-
-                        let db = state_clone.db.lock().await;
-                        if crate::journal::should_write_journal(&db, &agent_id_owned) {
-                            drop(db);
-                            crate::journal::spawn_journal_synthesis(
-                                state_clone.clone(), agent_id_owned.clone(), provider_clone.clone(),
-                            );
-                        }
-
-                        // Self-verification
-                        if original_messages.len() >= 2 {
-                            crate::self_verify::spawn_verification(
-                                state_clone.clone(), agent_id_owned.clone(), provider_clone.clone(),
-                                original_messages.clone(), task_id_owned.clone(), None,
-                            );
-                        }
-                    }
+                    run_post_task(
+                        state_clone.clone(), &agent_id_owned, &task_id_owned,
+                        true, 0, Some(&provider_clone), Some(&original_messages),
+                    ).await;
 
                     return; // Stream done
                 }
@@ -1067,31 +985,22 @@ async fn stream_llm_response(
         }
 
         // Stream ended without [DONE] — abnormal termination, treat as failure.
-        {
+        // Log partial LLM response if any, then delegate to run_post_task.
+        if !accumulated_content.is_empty() {
             let db = state_clone.db.lock().await;
-            let _ = registry::update_agent_status(&db, &agent_id_owned, "idle");
-            let _ = registry::increment_task_counts(&db, &agent_id_owned, false, 0);
-            if !accumulated_content.is_empty() {
-                let _ = episodic::insert_episode(&db, &Episode {
-                    id: uuid::Uuid::new_v4().to_string(), agent_id: agent_id_owned.clone(),
-                    created_at: chrono::Utc::now().to_rfc3339(), event_type: "llm_response".into(),
-                    summary: format!("LLM (partial): {}", accumulated_content.chars().take(200).collect::<String>()),
-                    raw_data: Some(accumulated_content), task_id: Some(task_id_owned.clone()),
-                    outcome: Some("partial".into()), tokens_used: 0, cost_cents: 0,
-                });
-            }
             let _ = episodic::insert_episode(&db, &Episode {
                 id: uuid::Uuid::new_v4().to_string(), agent_id: agent_id_owned.clone(),
-                created_at: chrono::Utc::now().to_rfc3339(), event_type: "task_end".into(),
-                summary: "Task completed (stream ended without DONE)".into(), raw_data: None,
-                task_id: Some(task_id_owned), outcome: Some("failure".into()),
-                tokens_used: 0, cost_cents: 0,
+                created_at: chrono::Utc::now().to_rfc3339(), event_type: "llm_response".into(),
+                summary: format!("LLM (partial): {}", accumulated_content.chars().take(200).collect::<String>()),
+                raw_data: Some(accumulated_content), task_id: Some(task_id_owned.clone()),
+                outcome: Some("partial".into()), tokens_used: 0, cost_cents: 0,
             });
         }
-        if let Some(handle) = &state_clone.app_handle {
-            let _ = handle.emit("agent-status-change", serde_json::json!({"id": agent_id_owned, "status": "idle"}));
-            let _ = handle.emit("activity-refresh", ());
-        }
+
+        run_post_task(
+            state_clone.clone(), &agent_id_owned, &task_id_owned,
+            false, 0, Some(&provider_clone), Some(&original_messages),
+        ).await;
     });
 
     let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
@@ -1108,17 +1017,17 @@ async fn increment_urgency(state: &AppState, agent_id: &str) {
     );
 }
 
-async fn finish_task(
+/// All post-task side effects: episodes, drives, mood, reflection, self-verify, etc.
+/// Called from both non-streaming (via finish_task) and streaming paths.
+async fn run_post_task(
     state: Arc<AppState>,
     agent_id: &str,
     task_id: &str,
     success: bool,
     cost_cents: i64,
-    response: serde_json::Value,
-    // For reflection: the provider and messages from the conversation
     provider: Option<&crate::providers::Provider>,
     messages: Option<&[serde_json::Value]>,
-) -> Response {
+) {
     {
         let db = state.db.lock().await;
         let _ = registry::update_agent_status(&db, agent_id, "idle");
@@ -1341,6 +1250,20 @@ async fn finish_task(
             }
         }
     }
+}
+
+/// Non-streaming finish: run all post-task side effects, then build HTTP Response.
+async fn finish_task(
+    state: Arc<AppState>,
+    agent_id: &str,
+    task_id: &str,
+    success: bool,
+    cost_cents: i64,
+    response: serde_json::Value,
+    provider: Option<&crate::providers::Provider>,
+    messages: Option<&[serde_json::Value]>,
+) -> Response {
+    run_post_task(state.clone(), agent_id, task_id, success, cost_cents, provider, messages).await;
 
     // Add task_id to response (both JSON body and header) for rating support
     let mut response = response;
