@@ -564,6 +564,10 @@ pub async fn chat_completions(
     let mut total_tokens = 0i64;
     let mut total_cost = 0i64;
     let mut iteration = 0;
+    // Sticky flag: set true if ANY tool call returns an error across all loop
+    // iterations. Never resets to false — per the success definition, a task
+    // that had any tool error is not successful even if the LLM recovered.
+    let mut has_tool_error = false;
 
     loop {
         iteration += 1;
@@ -758,8 +762,9 @@ pub async fn chat_completions(
 
         if let Some(tool_calls) = tool_calls {
             if tool_calls.is_empty() {
+                // has_tool_error may be true from a prior loop iteration
                 let msgs = body["messages"].as_array().map(|a| a.to_vec());
-                return finish_task(state.clone(), &agent.id, &task_id, true, total_cost, response_body, Some(&provider), msgs.as_deref()).await;
+                return finish_task(state.clone(), &agent.id, &task_id, !has_tool_error, total_cost, response_body, Some(&provider), msgs.as_deref()).await;
             }
 
             let mut tool_results = Vec::new();
@@ -788,6 +793,10 @@ pub async fn chat_completions(
                     execute_tool_call(&state, &agent.id, func_name, &func_args).await
                 };
 
+                if tool_result.starts_with("Error:") || tool_result.starts_with("Permission denied:") {
+                    has_tool_error = true;
+                }
+
                 tool_results.push(serde_json::json!({
                     "role": "tool",
                     "tool_call_id": tc_id,
@@ -800,8 +809,10 @@ pub async fn chat_completions(
                 messages.extend(tool_results);
             }
         } else {
+            // No tool_calls in this response — LLM gave a final text answer.
+            // has_tool_error may be true from a prior loop iteration.
             let msgs = body["messages"].as_array().map(|a| a.to_vec());
-            return finish_task(state.clone(), &agent.id, &task_id, true, total_cost, response_body, Some(&provider), msgs.as_deref()).await;
+            return finish_task(state.clone(), &agent.id, &task_id, !has_tool_error, total_cost, response_body, Some(&provider), msgs.as_deref()).await;
         }
     }
 }
@@ -940,6 +951,10 @@ async fn stream_llm_response(
 
                 if line == "data: [DONE]" {
                     let _ = tx.send(Ok(SseEvent::default().data("[DONE]"))).await;
+                    // Streaming path is gated on !has_tools at line 557, so tools
+                    // cannot be invoked here and there is nothing to fail. If
+                    // streaming tool support is ever added, this must become a
+                    // real success check like the non-streaming path.
                     // Log the accumulated response
                     {
                         let db = state_clone.db.lock().await;
@@ -1051,11 +1066,11 @@ async fn stream_llm_response(
             }
         }
 
-        // Stream ended without [DONE] — still log what we have
+        // Stream ended without [DONE] — abnormal termination, treat as failure.
         {
             let db = state_clone.db.lock().await;
             let _ = registry::update_agent_status(&db, &agent_id_owned, "idle");
-            let _ = registry::increment_task_counts(&db, &agent_id_owned, true, 0);
+            let _ = registry::increment_task_counts(&db, &agent_id_owned, false, 0);
             if !accumulated_content.is_empty() {
                 let _ = episodic::insert_episode(&db, &Episode {
                     id: uuid::Uuid::new_v4().to_string(), agent_id: agent_id_owned.clone(),
@@ -1068,8 +1083,8 @@ async fn stream_llm_response(
             let _ = episodic::insert_episode(&db, &Episode {
                 id: uuid::Uuid::new_v4().to_string(), agent_id: agent_id_owned.clone(),
                 created_at: chrono::Utc::now().to_rfc3339(), event_type: "task_end".into(),
-                summary: "Task completed (stream ended)".into(), raw_data: None,
-                task_id: Some(task_id_owned), outcome: Some("success".into()),
+                summary: "Task completed (stream ended without DONE)".into(), raw_data: None,
+                task_id: Some(task_id_owned), outcome: Some("failure".into()),
                 tokens_used: 0, cost_cents: 0,
             });
         }
