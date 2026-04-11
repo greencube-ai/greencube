@@ -14,6 +14,7 @@ use crate::permissions;
 use crate::permissions::audit;
 use crate::permissions::audit::AuditEntry;
 use crate::state::AppState;
+use crate::task_outcome::TaskOutcome;
 
 const MAX_TOOL_ITERATIONS: usize = 10;
 
@@ -250,6 +251,8 @@ pub async fn chat_completions(
 
     // 3. LOG TASK START
     let task_id = uuid::Uuid::new_v4().to_string();
+    let task_start = std::time::Instant::now();
+    let mut outcome = TaskOutcome::new();
     let user_message_summary = body["messages"]
         .as_array()
         .and_then(|msgs| msgs.iter().rev().find(|m| m["role"] == "user"))
@@ -555,6 +558,7 @@ pub async fn chat_completions(
 
     loop {
         iteration += 1;
+        outcome.record_llm_round();
         if iteration > MAX_TOOL_ITERATIONS {
             let db = state.db.lock().await;
             let _ = registry::update_agent_status(&db, &agent.id, "idle");
@@ -748,7 +752,8 @@ pub async fn chat_completions(
             if tool_calls.is_empty() {
                 // has_tool_error may be true from a prior loop iteration
                 let msgs = body["messages"].as_array().map(|a| a.to_vec());
-                return finish_task(state.clone(), &agent.id, &task_id, !has_tool_error, total_cost, response_body, Some(&provider), msgs.as_deref()).await;
+                outcome.finalize(task_start.elapsed(), total_cost);
+                return finish_task(state.clone(), &agent.id, &task_id, !has_tool_error, total_cost, response_body, Some(&provider), msgs.as_deref(), outcome).await;
             }
 
             let mut tool_results = Vec::new();
@@ -779,6 +784,9 @@ pub async fn chat_completions(
 
                 if tool_result.starts_with("Error:") || tool_result.starts_with("Permission denied:") {
                     has_tool_error = true;
+                    outcome.record_tool_call(true);
+                } else {
+                    outcome.record_tool_call(false);
                 }
 
                 tool_results.push(serde_json::json!({
@@ -796,7 +804,8 @@ pub async fn chat_completions(
             // No tool_calls in this response — LLM gave a final text answer.
             // has_tool_error may be true from a prior loop iteration.
             let msgs = body["messages"].as_array().map(|a| a.to_vec());
-            return finish_task(state.clone(), &agent.id, &task_id, !has_tool_error, total_cost, response_body, Some(&provider), msgs.as_deref()).await;
+            outcome.finalize(task_start.elapsed(), total_cost);
+            return finish_task(state.clone(), &agent.id, &task_id, !has_tool_error, total_cost, response_body, Some(&provider), msgs.as_deref(), outcome).await;
         }
     }
 }
@@ -878,7 +887,7 @@ async fn stream_llm_response(
                 }
                 // Streaming path is gated on !has_tools, so success=true is correct here.
                 let msgs: Vec<serde_json::Value> = body["messages"].as_array().cloned().unwrap_or_default();
-                run_post_task(state.clone(), agent_id, task_id, true, 0, Some(provider), Some(&msgs)).await;
+                run_post_task(state.clone(), agent_id, task_id, true, 0, Some(provider), Some(&msgs), TaskOutcome::new()).await;
                 return Json(response_body).into_response();
             }
             Err(e) => {
@@ -950,6 +959,7 @@ async fn stream_llm_response(
                     run_post_task(
                         state_clone.clone(), &agent_id_owned, &task_id_owned,
                         true, 0, Some(&provider_clone), Some(&original_messages),
+                        TaskOutcome::new(),
                     ).await;
 
                     return; // Stream done
@@ -984,6 +994,7 @@ async fn stream_llm_response(
         run_post_task(
             state_clone.clone(), &agent_id_owned, &task_id_owned,
             false, 0, Some(&provider_clone), Some(&original_messages),
+            TaskOutcome::new(),
         ).await;
     });
 
@@ -1011,6 +1022,7 @@ async fn run_post_task(
     cost_cents: i64,
     provider: Option<&crate::providers::Provider>,
     messages: Option<&[serde_json::Value]>,
+    _outcome: TaskOutcome,
 ) {
     {
         let db = state.db.lock().await;
@@ -1134,8 +1146,9 @@ async fn finish_task(
     response: serde_json::Value,
     provider: Option<&crate::providers::Provider>,
     messages: Option<&[serde_json::Value]>,
+    outcome: TaskOutcome,
 ) -> Response {
-    run_post_task(state.clone(), agent_id, task_id, success, cost_cents, provider, messages).await;
+    run_post_task(state.clone(), agent_id, task_id, success, cost_cents, provider, messages, outcome).await;
 
     // Add task_id to response (both JSON body and header) for rating support
     let mut response = response;

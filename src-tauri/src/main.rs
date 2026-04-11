@@ -37,6 +37,7 @@ mod relationships;
 mod self_verify;
 mod spawn;
 mod state;
+mod task_outcome;
 mod task_patterns;
 mod task_queue;
 mod time_sense;
