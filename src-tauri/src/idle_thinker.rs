@@ -28,6 +28,7 @@ fn is_idle_junk(text: &str) -> bool {
 }
 
 /// Main idle thinking loop. Spawned from main.rs.
+#[allow(dead_code)]
 pub async fn run_idle_thinker(state: Arc<AppState>) {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
     loop {

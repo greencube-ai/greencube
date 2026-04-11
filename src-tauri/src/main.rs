@@ -256,11 +256,12 @@ fn main() {
                 let _ = task_queue::cleanup_old_tasks(&db_ref);
             }
 
-            // Spawn idle thinker background loop
-            let idle_state = state.clone();
-            tauri::async_runtime::spawn(async move {
-                idle_thinker::run_idle_thinker(idle_state).await;
-            });
+            // idle_thinker disabled — creature feature, not on signal path
+            // for behavioral memory. File kept for future deletion in cleanup sweep.
+            // let idle_state = state.clone();
+            // tauri::async_runtime::spawn(async move {
+            //     idle_thinker::run_idle_thinker(idle_state).await;
+            // });
 
             // Spawn task queue processor
             let queue_state = state.clone();
