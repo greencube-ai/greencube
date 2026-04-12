@@ -5,3 +5,4 @@ target/
 *.log
 .DS_Store
 Thumbs.db
+bench_results*.json

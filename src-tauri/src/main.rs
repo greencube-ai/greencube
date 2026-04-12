@@ -45,6 +45,9 @@ mod trajectory;
 mod token_usage;
 mod tool_memory;
 
+#[cfg(test)]
+mod bench_harness;
+
 use config::config_dir;
 use state::AppState;
 use std::sync::Arc;
