@@ -15,6 +15,7 @@ use crate::permissions::audit;
 use crate::permissions::audit::AuditEntry;
 use crate::state::AppState;
 use crate::task_outcome::TaskOutcome;
+use crate::competence;
 
 const MAX_TOOL_ITERATIONS: usize = 10;
 
@@ -1022,7 +1023,7 @@ async fn run_post_task(
     cost_cents: i64,
     provider: Option<&crate::providers::Provider>,
     messages: Option<&[serde_json::Value]>,
-    _outcome: TaskOutcome,
+    outcome: TaskOutcome,
 ) {
     {
         let db = state.db.lock().await;
@@ -1126,13 +1127,44 @@ async fn run_post_task(
             );
         }
 
-        // Self-verification
-        if msgs.len() >= 2 {
-            crate::self_verify::spawn_verification(
-                state.clone(), agent_id.to_string(), provider.clone(),
-                msgs.to_vec(), task_id.to_string(), None,
-            );
-        }
+    }
+
+    // Grounded Judge — evaluate task outcome, update competence
+    let verdict = crate::self_verify::judge_task(&outcome);
+    if verdict.delta != 0.0 {
+        let db = state.db.lock().await;
+        let domain = competence::get_most_recent_domain(&db, agent_id)
+            .ok().flatten().unwrap_or_else(|| "general".into());
+        let is_success = verdict.delta > 0.0;
+        let _ = competence::update_competence(&db, agent_id, &domain, is_success, None);
+    }
+    // Log verdict as episode — full TaskOutcome snapshot for audit trail
+    {
+        let db = state.db.lock().await;
+        let _ = episodic::insert_episode(&db, &Episode {
+            id: uuid::Uuid::new_v4().to_string(),
+            agent_id: agent_id.into(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            event_type: "judge_verdict".into(),
+            summary: format!("Judge: delta={:+.2}, {}", verdict.delta, verdict.reason),
+            raw_data: Some(serde_json::json!({
+                "delta": verdict.delta,
+                "reason": verdict.reason,
+                "signals_used": verdict.signals_used,
+                "outcome": {
+                    "tool_call_count": outcome.tool_call_count,
+                    "tool_error_count": outcome.tool_error_count,
+                    "llm_rounds": outcome.llm_rounds,
+                    "duration_ms": outcome.duration_ms,
+                    "cost_cents": outcome.cost_cents,
+                    "success": outcome.success
+                }
+            }).to_string()),
+            task_id: Some(task_id.into()),
+            outcome: Some(if verdict.delta > 0.0 { "success" } else if verdict.delta < 0.0 { "failure" } else { "neutral" }.into()),
+            tokens_used: 0,
+            cost_cents: 0,
+        });
     }
 }
 
