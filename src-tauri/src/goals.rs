@@ -76,6 +76,7 @@ fn map_goal(row: &rusqlite::Row) -> rusqlite::Result<Goal> {
 
 /// Check if goals should be generated and spawn if so.
 /// Triggers: every 10 tasks OR if 0 active goals and >= 5 tasks (cold start).
+#[allow(dead_code)]
 pub fn maybe_generate_goals(
     state: Arc<AppState>,
     agent_id: String,

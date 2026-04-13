@@ -7,6 +7,7 @@ use crate::state::AppState;
 const PROFILE_INTERVAL: i64 = 5; // Regenerate every 5 tasks
 
 /// Check if profile should be regenerated (every N tasks) and spawn if so.
+#[allow(dead_code)]
 pub fn maybe_regenerate(state: Arc<AppState>, agent_id: String, provider: Provider, total_tasks: i64) {
     if total_tasks > 0 && total_tasks % PROFILE_INTERVAL == 0 {
         tokio::spawn(async move {

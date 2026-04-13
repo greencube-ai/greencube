@@ -1117,14 +1117,16 @@ async fn run_post_task(
         }
 
         if success {
-            crate::profile::maybe_regenerate(
-                state.clone(), agent_id.to_string(), provider.clone(), total_tasks,
-            );
+            // Disabled — creature feature, not on signal path. File kept for future cleanup sweep.
+            // crate::profile::maybe_regenerate(
+            //     state.clone(), agent_id.to_string(), provider.clone(), total_tasks,
+            // );
 
-            crate::goals::maybe_generate_goals(
-                state.clone(), agent_id.to_string(), provider.clone(),
-                total_tasks, active_goal_count,
-            );
+            // Disabled — creature feature, not on signal path. File kept for future cleanup sweep.
+            // crate::goals::maybe_generate_goals(
+            //     state.clone(), agent_id.to_string(), provider.clone(),
+            //     total_tasks, active_goal_count,
+            // );
         }
 
     }

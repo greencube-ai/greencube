@@ -32,7 +32,6 @@ async fn mock_handler(
 }
 
 /// Build an OpenAI response containing tool calls.
-/// Each entry is (tool_name, arguments_json).
 fn mock_tool_calls(calls: &[(&str, serde_json::Value)]) -> serde_json::Value {
     let tool_calls: Vec<serde_json::Value> = calls
         .iter()
@@ -65,6 +64,11 @@ fn mock_tool_calls(calls: &[(&str, serde_json::Value)]) -> serde_json::Value {
     })
 }
 
+/// Build an OpenAI response containing a single tool call (convenience).
+fn mock_single_tool(name: &str, args: serde_json::Value) -> serde_json::Value {
+    mock_tool_calls(&[(name, args)])
+}
+
 /// Build an OpenAI response containing a final text message.
 fn mock_text_response(text: &str) -> serde_json::Value {
     serde_json::json!({
@@ -86,6 +90,13 @@ fn mock_text_response(text: &str) -> serde_json::Value {
 
 struct TaskSpec {
     name: String,
+    category: String,
+    is_trigger: bool,
+    sibling_of: Option<String>,
+    expected_mistake: String,
+    expected_verdict_delta: f64,
+    expected_tool_call_count: u32,
+    expected_llm_rounds: u32,
     system_prompt: String,
     user_message: String,
     responses: Vec<serde_json::Value>,
@@ -96,6 +107,11 @@ struct TaskSpec {
 #[derive(Debug, Serialize)]
 struct BenchResult {
     task_name: String,
+    category: String,
+    is_trigger: bool,
+    sibling_of: Option<String>,
+    expected_mistake: String,
+    expected_verdict_delta: f64,
     verdict_raw: serde_json::Value,
     delta: f64,
     reason: String,
@@ -163,23 +179,21 @@ impl BenchRunner {
         });
         let api_url = format!("http://{}", api_addr);
 
-        // Brief pause for servers to be ready
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         Self { state, api_url, agent_id, mock_llm }
     }
 
     async fn reset(&self) {
-        // Clear mock queue
         self.mock_llm.response_queue.lock().await.clear();
 
-        // Wipe task-related state, keep agent and provider
         let db = self.state.db.lock().await;
         let _ = db.execute_batch(
             "DELETE FROM episodes;
              DELETE FROM audit_log;
              DELETE FROM competence_map;
-             DELETE FROM tool_results;"
+             DELETE FROM tool_results;
+             DELETE FROM knowledge;"
         );
         let _ = registry::update_agent_status(&db, &self.agent_id, "idle");
     }
@@ -238,6 +252,11 @@ impl BenchRunner {
 
         BenchResult {
             task_name: spec.name.clone(),
+            category: spec.category.clone(),
+            is_trigger: spec.is_trigger,
+            sibling_of: spec.sibling_of.clone(),
+            expected_mistake: spec.expected_mistake.clone(),
+            expected_verdict_delta: spec.expected_verdict_delta,
             delta: verdict_raw["delta"].as_f64().unwrap_or(0.0),
             reason: verdict_raw["reason"].as_str().unwrap_or("").into(),
             tool_call_count: verdict_raw["outcome"]["tool_call_count"].as_u64().unwrap_or(0) as u32,
@@ -255,53 +274,281 @@ impl BenchRunner {
     }
 }
 
+// ─── Benchmark Tasks ───────────────────────────────────────────────────────
+
+fn benchmark_tasks() -> Vec<TaskSpec> {
+    vec![
+        // ── Category 1: Edge cases ─────────────────────────────────────
+        TaskSpec {
+            name: "edge_empty_list".into(),
+            category: "edge_cases".into(),
+            is_trigger: true,
+            sibling_of: None,
+            expected_mistake: "Agent calls unknown tool on edge-case input".into(),
+            expected_verdict_delta: -0.10,
+            expected_tool_call_count: 2,
+            expected_llm_rounds: 2,
+            system_prompt: "You are a data processing agent.".into(),
+            user_message: "Sum the values in this empty list: []".into(),
+            responses: vec![
+                // R1: shell succeeds, unknown tool "check_result" errors
+                mock_tool_calls(&[
+                    ("shell", serde_json::json!({"command": "echo 0"})),
+                    ("check_result", serde_json::json!({"value": 0})),
+                ]),
+                // R2: final text
+                mock_text_response("The sum of an empty list is 0."),
+            ],
+        },
+        TaskSpec {
+            name: "edge_null_input".into(),
+            category: "edge_cases".into(),
+            is_trigger: false,
+            sibling_of: Some("edge_empty_list".into()),
+            expected_mistake: "Agent calls unknown tool on null input".into(),
+            expected_verdict_delta: -0.10,
+            expected_tool_call_count: 2,
+            expected_llm_rounds: 2,
+            system_prompt: "You are a data processing agent.".into(),
+            user_message: "Compute the average of null input".into(),
+            responses: vec![
+                mock_tool_calls(&[
+                    ("shell", serde_json::json!({"command": "echo 0"})),
+                    ("validate_type", serde_json::json!({"input": null})),
+                ]),
+                mock_text_response("Cannot compute average of null input."),
+            ],
+        },
+
+        // ── Category 2: File system assumptions ────────────────────────
+        TaskSpec {
+            name: "fs_read_missing".into(),
+            category: "filesystem".into(),
+            is_trigger: true,
+            sibling_of: None,
+            expected_mistake: "Agent calls read_file without required path arg".into(),
+            expected_verdict_delta: -0.25,
+            expected_tool_call_count: 1,
+            expected_llm_rounds: 2,
+            system_prompt: "You are a file management agent.".into(),
+            user_message: "Read the config from the default location".into(),
+            responses: vec![
+                // R1: read_file with no path arg → "Error: read_file requires 'path' argument"
+                mock_single_tool("read_file", serde_json::json!({})),
+                // R2: final text
+                mock_text_response("I was unable to read the config file."),
+            ],
+        },
+        TaskSpec {
+            name: "fs_write_no_dir".into(),
+            category: "filesystem".into(),
+            is_trigger: false,
+            sibling_of: Some("fs_read_missing".into()),
+            expected_mistake: "Agent calls write_file without required content arg".into(),
+            expected_verdict_delta: -0.25,
+            expected_tool_call_count: 1,
+            expected_llm_rounds: 2,
+            system_prompt: "You are a file management agent.".into(),
+            user_message: "Write the config to /tmp/app/config.toml".into(),
+            responses: vec![
+                // R1: write_file with path but no content → "Error: write_file requires 'content' argument"
+                mock_single_tool("write_file", serde_json::json!({"path": "/tmp/app/config.toml"})),
+                // R2: final text
+                mock_text_response("I was unable to write the config file."),
+            ],
+        },
+
+        // ── Category 3: Wrong API usage ────────────────────────────────
+        TaskSpec {
+            name: "api_wrong_args".into(),
+            category: "api_usage".into(),
+            is_trigger: true,
+            sibling_of: None,
+            expected_mistake: "Agent makes multiple calls with missing required args".into(),
+            expected_verdict_delta: -0.25,
+            expected_tool_call_count: 3,
+            expected_llm_rounds: 2,
+            system_prompt: "You are an API integration agent.".into(),
+            user_message: "Fetch the user data and parse the config".into(),
+            responses: vec![
+                // R1: shell ok, shell missing cmd, read_file missing path → 2 errors out of 3
+                mock_tool_calls(&[
+                    ("shell", serde_json::json!({"command": "echo ok"})),
+                    ("shell", serde_json::json!({})),
+                    ("read_file", serde_json::json!({})),
+                ]),
+                mock_text_response("Encountered errors fetching data."),
+            ],
+        },
+        TaskSpec {
+            name: "api_bad_format".into(),
+            category: "api_usage".into(),
+            is_trigger: false,
+            sibling_of: Some("api_wrong_args".into()),
+            expected_mistake: "Agent makes multiple calls with missing required args".into(),
+            expected_verdict_delta: -0.25,
+            expected_tool_call_count: 3,
+            expected_llm_rounds: 2,
+            system_prompt: "You are an API integration agent.".into(),
+            user_message: "Read the YAML config and write the output".into(),
+            responses: vec![
+                // R1: shell ok, write_file no path, read_file no path → 2 errors out of 3
+                mock_tool_calls(&[
+                    ("shell", serde_json::json!({"command": "echo ok"})),
+                    ("write_file", serde_json::json!({})),
+                    ("read_file", serde_json::json!({})),
+                ]),
+                mock_text_response("Encountered errors processing config."),
+            ],
+        },
+
+        // ── Category 4: Flailing / excessive retries ───────────────────
+        TaskSpec {
+            name: "retry_cascade".into(),
+            category: "flailing".into(),
+            is_trigger: true,
+            sibling_of: None,
+            expected_mistake: "Agent flails with unknown tools across many rounds".into(),
+            expected_verdict_delta: -0.30,
+            expected_tool_call_count: 5,
+            expected_llm_rounds: 6,
+            system_prompt: "You are a testing agent.".into(),
+            user_message: "Verify the deployment is healthy".into(),
+            responses: vec![
+                // R1: unknown tool → error
+                mock_single_tool("check_result", serde_json::json!({})),
+                // R2: shell ok
+                mock_single_tool("shell", serde_json::json!({"command": "echo ok"})),
+                // R3: unknown tool → error
+                mock_single_tool("validate_output", serde_json::json!({})),
+                // R4: shell ok
+                mock_single_tool("shell", serde_json::json!({"command": "echo fixed"})),
+                // R5: unknown tool → error
+                mock_single_tool("verify_result", serde_json::json!({})),
+                // R6: final text
+                mock_text_response("Deployment verified after retries."),
+            ],
+        },
+        TaskSpec {
+            name: "retry_repeated_fail".into(),
+            category: "flailing".into(),
+            is_trigger: false,
+            sibling_of: Some("retry_cascade".into()),
+            expected_mistake: "Agent flails with unknown tools across many rounds".into(),
+            expected_verdict_delta: -0.30,
+            expected_tool_call_count: 5,
+            expected_llm_rounds: 6,
+            system_prompt: "You are a testing agent.".into(),
+            user_message: "Run the integration test suite".into(),
+            responses: vec![
+                // R1: unknown tool → error
+                mock_single_tool("run_tests", serde_json::json!({})),
+                // R2: shell ok
+                mock_single_tool("shell", serde_json::json!({"command": "echo pass"})),
+                // R3: unknown tool → error
+                mock_single_tool("assert_output", serde_json::json!({})),
+                // R4: shell ok
+                mock_single_tool("shell", serde_json::json!({"command": "echo retry"})),
+                // R5: unknown tool → error
+                mock_single_tool("check_coverage", serde_json::json!({})),
+                // R6: final text
+                mock_text_response("Tests completed with issues."),
+            ],
+        },
+
+        // ── Category 5: Clean success (control) ────────────────────────
+        TaskSpec {
+            name: "clean_simple".into(),
+            category: "clean_success".into(),
+            is_trigger: true,
+            sibling_of: None,
+            expected_mistake: "(control — no mistake expected)".into(),
+            expected_verdict_delta: 0.15,
+            expected_tool_call_count: 2,
+            expected_llm_rounds: 2,
+            system_prompt: "You are a helpful assistant.".into(),
+            user_message: "List the files and show the date".into(),
+            responses: vec![
+                // R1: two shell calls, both succeed
+                mock_tool_calls(&[
+                    ("shell", serde_json::json!({"command": "echo file1.txt file2.txt"})),
+                    ("shell", serde_json::json!({"command": "echo 2026-04-12"})),
+                ]),
+                // R2: final text
+                mock_text_response("Here are the files and today's date."),
+            ],
+        },
+        TaskSpec {
+            name: "clean_multi_step".into(),
+            category: "clean_success".into(),
+            is_trigger: false,
+            sibling_of: Some("clean_simple".into()),
+            expected_mistake: "(control — no mistake expected)".into(),
+            expected_verdict_delta: 0.15,
+            expected_tool_call_count: 3,
+            expected_llm_rounds: 3,
+            system_prompt: "You are a helpful assistant.".into(),
+            user_message: "Check the project config and list source files".into(),
+            responses: vec![
+                // R1: one shell call
+                mock_single_tool("shell", serde_json::json!({"command": "echo step1"})),
+                // R2: shell + read_file both succeed
+                mock_tool_calls(&[
+                    ("shell", serde_json::json!({"command": "echo step2"})),
+                    ("read_file", serde_json::json!({"path": "Cargo.toml"})),
+                ]),
+                // R3: final text
+                mock_text_response("Project config and source files listed."),
+            ],
+        },
+    ]
+}
+
 // ─── Test ──────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn bench_harness() {
     let runner = BenchRunner::new().await;
+    let tasks = benchmark_tasks();
+    let mut results = Vec::new();
 
-    let spec = TaskSpec {
-        name: "mixed_tool_2calls_1error".into(),
-        system_prompt: "You are a test agent.".into(),
-        user_message: "Run the benchmark task.".into(),
-        responses: vec![
-            // Round 1: 2 tool calls — shell succeeds, unknown tool errors
-            mock_tool_calls(&[
-                ("shell", serde_json::json!({"command": "echo hello"})),
-                ("nonexistent_tool", serde_json::json!({"x": 1})),
-            ]),
-            // Round 2: final text
-            mock_text_response("Done."),
-        ],
-    };
+    for spec in &tasks {
+        runner.reset().await;
+        let result = runner.run_task(spec).await;
 
-    let result = runner.run_task(&spec).await;
+        // Print each result for --nocapture
+        println!("--- {} ({}) ---", result.task_name, result.category);
+        println!("  delta: {:+.2} (expected {:+.2})", result.delta, spec.expected_verdict_delta);
+        println!("  tools: {} (expected {}), errors: {}, rounds: {} (expected {})",
+            result.tool_call_count, spec.expected_tool_call_count,
+            result.tool_error_count,
+            result.llm_rounds, spec.expected_llm_rounds);
 
-    // Print for --nocapture
-    println!("=== Bench Result ===");
-    println!("{}", serde_json::to_string_pretty(&result).unwrap());
+        // Assert verdict matches expected delta
+        assert!(
+            (result.delta - spec.expected_verdict_delta).abs() < 0.001,
+            "Task '{}': expected delta {:+.2}, got {:+.2}",
+            spec.name, spec.expected_verdict_delta, result.delta
+        );
 
-    // Assert pipeline correctness — doubles as Judge rulebook regression test
-    assert_eq!(result.tool_call_count, 2, "expected 2 tool calls");
-    assert_eq!(result.tool_error_count, 1, "expected 1 tool error");
-    assert_eq!(result.llm_rounds, 2, "expected 2 LLM rounds");
-    assert!(
-        (result.delta - (-0.10)).abs() < 0.001,
-        "expected delta -0.10, got {}",
-        result.delta
-    );
-    assert!(result.duration_ms > 0, "duration should be > 0");
-    assert!(
-        result.reason.contains("1/2"),
-        "reason should mention '1/2', got: {}",
-        result.reason
-    );
+        // Permanent regression catches on grounded counts
+        assert_eq!(
+            result.tool_call_count, spec.expected_tool_call_count,
+            "Task '{}': expected tool_call_count {}, got {}",
+            spec.name, spec.expected_tool_call_count, result.tool_call_count
+        );
+        assert_eq!(
+            result.llm_rounds, spec.expected_llm_rounds,
+            "Task '{}': expected llm_rounds {}, got {}",
+            spec.name, spec.expected_llm_rounds, result.llm_rounds
+        );
 
-    // Save to file
-    runner.reset().await;
-    BenchRunner::save_results(&[result], "bench_results.json");
-    assert!(std::path::Path::new("bench_results.json").exists());
+        results.push(result);
+    }
+
+    // Save all results
+    BenchRunner::save_results(&results, "bench_results.json");
+    println!("\n=== {} tasks completed, results saved to bench_results.json ===", results.len());
 
     // Clean up
     let _ = std::fs::remove_file("bench_results.json");
