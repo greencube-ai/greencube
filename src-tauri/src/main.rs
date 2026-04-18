@@ -13,7 +13,6 @@ mod context_clusters;
 mod creature_status;
 mod curiosity;
 mod db;
-mod drives;
 mod errors;
 mod feedback;
 mod fork;
@@ -26,7 +25,6 @@ mod memory;
 mod metrics;
 mod mood;
 mod notifications;
-mod patterns;
 mod permissions;
 mod profile;
 mod projects;
@@ -338,7 +336,6 @@ fn main() {
             commands::get_server_info,
             commands::reset_app,
             commands::get_agent_lineage,
-            commands::debug_spawn,
             commands::get_competence_map,
             commands::get_creature_status,
             commands::rate_response,

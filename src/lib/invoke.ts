@@ -72,10 +72,6 @@ export async function getAgentLineage(agentId: string): Promise<AgentLineage> {
   return invoke<AgentLineage>('get_agent_lineage', { agentId });
 }
 
-export async function debugSpawn(agentId: string, domain: string): Promise<string> {
-  return invoke<string>('debug_spawn', { agentId, domain });
-}
-
 export async function setAgentContext(agentId: string, content: string): Promise<void> {
   return invoke<void>('set_agent_context', { agentId, content });
 }

@@ -6,3 +6,7 @@ target/
 .DS_Store
 Thumbs.db
 bench_results*.json
+/*.jsonl
+/probe_results.*
+/agent_loop_results*.jsonl
+/agent_loop_results*.summary.json

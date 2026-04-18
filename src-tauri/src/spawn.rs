@@ -311,65 +311,6 @@ Write ONLY the system prompt, nothing else."#,
     Ok(child_name)
 }
 
-/// Debug-only: force spawn a specialist without competence validation.
-/// Used by the test button in the UI. Remove before real launch.
-pub async fn debug_force_spawn(
-    state: &AppState,
-    parent_agent_id: &str,
-    domain: &str,
-) -> anyhow::Result<String> {
-    let domain = domain.to_lowercase().trim().to_string();
-
-    let (parent, provider) = {
-        let db = state.db.lock().await;
-        let parent = registry::get_agent(&db, parent_agent_id)?
-            .ok_or_else(|| anyhow::anyhow!("Agent not found"))?;
-        let provider = providers::get_provider_for_agent(&db, &parent)?;
-        (parent, provider)
-    };
-
-    // Generate a simple system prompt
-    let prompt = format!("You are a specialist in {}. Focus on accuracy and flag uncertainty.", domain);
-
-    // Create child agent
-    let child_name = {
-        let db = state.db.lock().await;
-        let name = format!("{}-specialist", domain);
-        let tools: Vec<String> = parent.tools_allowed.iter()
-            .filter(|t| *t != "spawn_specialist")
-            .cloned().collect();
-        let child = registry::create_agent_with_provider(&db, &name, &prompt, &tools, parent.provider_id.as_deref())?;
-
-        // Create lineage record
-        let now = chrono::Utc::now().to_rfc3339();
-        db.execute(
-            "INSERT INTO agent_lineage (id, parent_id, child_id, domain, knowledge_transferred, created_at) VALUES (?1, ?2, ?3, ?4, 0, ?5)",
-            params![uuid::Uuid::new_v4().to_string(), parent_agent_id, child.id, domain, now],
-        )?;
-
-        // Log episode
-        let _ = episodic::insert_episode(&db, &Episode {
-            id: uuid::Uuid::new_v4().to_string(),
-            agent_id: parent_agent_id.into(),
-            created_at: now,
-            event_type: "spawn".into(),
-            summary: format!("Debug spawned {} for {}", name, domain),
-            raw_data: None, task_id: None,
-            outcome: Some("success".into()),
-            tokens_used: 0, cost_cents: 0,
-        });
-
-        name
-    };
-
-    if let Some(handle) = &state.app_handle {
-        let _ = handle.emit("activity-refresh", ());
-    }
-
-    tracing::info!("Debug spawn: {} created {} for {}", parent.name, child_name, domain);
-    Ok(child_name)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
