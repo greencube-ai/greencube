@@ -265,7 +265,7 @@ export function OnboardingModal() {
             <button onClick={handleDone}
               className="px-8 py-2.5 rounded-lg text-black font-semibold hover:brightness-110 transition"
               style={{ backgroundColor: 'var(--accent)' }}>
-              Go to Dashboard
+              Finish Setup
             </button>
             <p className="text-xs mt-3" style={{ color: '#71717a' }}>Close this window anytime. GreenCube keeps running in the system tray.</p>
           </div>

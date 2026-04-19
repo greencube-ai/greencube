@@ -1,3 +1,5 @@
+> **LEGACY DOCUMENT.** This spec describes the creature-era design (dated 2026-03-25). It does not reflect current greencube architecture. See STATUS.md for current state.
+
 # GREENCUBE v0.1 — TECHNICAL SPECIFICATION
 
 > **Author:** Claude Code (Architect)

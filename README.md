@@ -31,30 +31,24 @@ curl localhost:9000/brain
 ```
 
 ```
----
-greencube agent: Dev
-mood: confident | 47 tasks | 84% success
-greencube overhead today: ~2400 tokens (~$0.024)
----
-what i know (12 facts):
-  - Stripe API needs Bearer auth
-  - user prefers short answers
-  - pytest over unittest
----
-what im good at:
-  python       ████████ 87%
-  api          ███████ 71%
-  css          ████ 43%
----
+🧠 Dev | state: confident | 47 tasks | 84% success
+learned:
+  • Stripe API needs Bearer auth
+  • user prefers short answers
+  • pytest over unittest
+good at:
+  • python       ████░ 87%
+  • api          ███░░ 71%
+  • css          ██░░░ 43%
 improvements:
-  mistakes prevented: 3
-  facts used in tasks: 47
-  corrections applied: 2
----
+  • 3 mistakes prevented
+  • 47 facts used in tasks
+  • 2 corrections applied
 recent:
-  2min ago   learned 3 facts about database indexing
-  8min ago   self-check: good
-  15min ago  prevented mistake from past feedback
+  ✓ 2m ago   "add tests for webhook handlers"
+  ✓ 8m ago   "fix stripe signature validation"
+  • 15m ago  "refactor settings page layout"
+today: ~2400 tokens (~$0.024)
 ```
 
 other terminal commands:
@@ -78,7 +72,7 @@ greencube runs a local proxy on your machine (localhost:9000). your agent talks 
 
 ## the numbers
 
-- 145 tests passing
+- 142 tests passing
 - 45+ rust modules
 - works on windows + mac + linux
 - MIT license

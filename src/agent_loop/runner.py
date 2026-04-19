@@ -70,11 +70,38 @@ def project_cost(runs_per_condition: int, num_tasks: int = None) -> float:
     return (prompt_tokens * 0.00015 / 1000) + (completion_tokens * 0.00060 / 1000)
 
 
+def _messages_to_events(messages: list) -> list:
+    """Flatten messages_log into an ordered event list, skipping system."""
+    events = []
+    for m in messages:
+        role = m.get("role") if isinstance(m, dict) else None
+        if role is None or role == "system":
+            continue
+        if role == "user":
+            events.append({"role": "user", "content": m.get("content") or ""})
+        elif role == "assistant":
+            entry = {"role": "assistant", "content": m.get("content") or ""}
+            tcs = m.get("tool_calls") or []
+            if tcs:
+                entry["tool_calls"] = [
+                    {
+                        "name": tc["function"]["name"],
+                        "arguments": tc["function"]["arguments"],
+                    }
+                    for tc in tcs
+                ]
+            events.append(entry)
+        elif role == "tool":
+            events.append({"role": "tool", "content": m.get("content") or ""})
+    return events
+
+
 def run_all(
     agent: AgentRunner,
     runs_per_condition: int,
     output_path: str = "agent_loop_results.jsonl",
     task_filter: List[str] = None,
+    traces_path: str = None,
 ) -> List[RunRecord]:
     """Run all (condition, task, run_idx) combos, skip already-persisted."""
     existing_records, done_keys = _load_existing(output_path)
@@ -86,47 +113,69 @@ def run_all(
     remaining = total - skipped
     print(f"Total runs: {total}, already done: {skipped}, remaining: {remaining}")
 
-    with open(output_path, "a", encoding="utf-8") as f:
-        for condition in ("baseline", "injected"):
-            for task in active_tasks:
-                for run_idx in range(runs_per_condition):
-                    key = (task.name, condition, run_idx)
-                    if key in done_keys:
-                        continue
+    traces_f = open(traces_path, "a", encoding="utf-8") if traces_path else None
+    try:
+        with open(output_path, "a", encoding="utf-8") as f:
+            for condition in ("baseline", "injected"):
+                for task in active_tasks:
+                    for run_idx in range(runs_per_condition):
+                        key = (task.name, condition, run_idx)
+                        if key in done_keys:
+                            continue
 
-                    print(f"  [{condition}] {task.name} run {run_idx}...", end=" ", flush=True)
-                    result: AgentResult = agent.run(task, condition)
-                    mistake = detect_mistake(task, result.trace, result.final_text)
+                        print(f"  [{condition}] {task.name} run {run_idx}...", end=" ", flush=True)
+                        result: AgentResult = agent.run(task, condition)
+                        mistake = detect_mistake(task, result.trace, result.final_text)
 
-                    rec = RunRecord(
-                        task_name=task.name,
-                        condition=condition,
-                        run_idx=run_idx,
-                        mistake=mistake,
-                        turns=result.turns,
-                        tool_calls=len(result.trace),
-                        final_text=result.final_text,
-                        prompt_tokens=result.prompt_tokens,
-                        completion_tokens=result.completion_tokens,
-                    )
-                    all_records.append(rec)
+                        rec = RunRecord(
+                            task_name=task.name,
+                            condition=condition,
+                            run_idx=run_idx,
+                            mistake=mistake,
+                            turns=result.turns,
+                            tool_calls=len(result.trace),
+                            final_text=result.final_text,
+                            prompt_tokens=result.prompt_tokens,
+                            completion_tokens=result.completion_tokens,
+                        )
+                        all_records.append(rec)
 
-                    row = {
-                        "task_name": rec.task_name,
-                        "condition": rec.condition,
-                        "run_idx": rec.run_idx,
-                        "mistake": rec.mistake,
-                        "turns": rec.turns,
-                        "tool_calls": rec.tool_calls,
-                        "final_text": rec.final_text,
-                        "prompt_tokens": rec.prompt_tokens,
-                        "completion_tokens": rec.completion_tokens,
-                    }
-                    f.write(json.dumps(row) + "\n")
-                    f.flush()
+                        row = {
+                            "task_name": rec.task_name,
+                            "condition": rec.condition,
+                            "run_idx": rec.run_idx,
+                            "mistake": rec.mistake,
+                            "turns": rec.turns,
+                            "tool_calls": rec.tool_calls,
+                            "final_text": rec.final_text,
+                            "prompt_tokens": rec.prompt_tokens,
+                            "completion_tokens": rec.completion_tokens,
+                        }
+                        f.write(json.dumps(row) + "\n")
+                        f.flush()
 
-                    status = "MISTAKE" if mistake else "ok"
-                    print(f"{status} (turns={result.turns}, tools={len(result.trace)})")
+                        if traces_f is not None:
+                            trace_row = {
+                                "task_name": rec.task_name,
+                                "condition": rec.condition,
+                                "run_idx": rec.run_idx,
+                                "mistake": rec.mistake,
+                                "turns": rec.turns,
+                                "trace": [
+                                    {"tool": tc.tool, "args": tc.args, "result": tc.result}
+                                    for tc in result.trace
+                                ],
+                                "events": _messages_to_events(result.messages_log),
+                                "final_text": rec.final_text,
+                            }
+                            traces_f.write(json.dumps(trace_row) + "\n")
+                            traces_f.flush()
+
+                        status = "MISTAKE" if mistake else "ok"
+                        print(f"{status} (turns={result.turns}, tools={len(result.trace)})")
+    finally:
+        if traces_f is not None:
+            traces_f.close()
 
     return all_records
 

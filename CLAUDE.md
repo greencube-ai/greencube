@@ -2,13 +2,12 @@
 
 ## What is this?
 GreenCube is a Tauri 2.0 desktop app where AI agents live as persistent beings.
-Rust backend + React/TypeScript frontend + SQLite + Docker sandboxing.
+Rust backend + React/TypeScript frontend + SQLite.
 
 ## Architecture
 - Tauri 2.0 with axum HTTP server on localhost:9000
 - SQLite database at ~/.greencube/greencube.db
 - Config at ~/.greencube/config.toml
-- Docker via bollard for sandboxed tool execution
 
 ## Build
 - Frontend: `npm run dev` (Vite on :1420)
@@ -24,15 +23,14 @@ Rust backend + React/TypeScript frontend + SQLite + Docker sandboxing.
 - All IDs are UUID v4 strings
 - No unwrap() in production code — use ? or expect() with a message
 - Frontend uses Tauri invoke for all backend communication
-- No streaming in v0.1 — all LLM responses are complete
+- LLM responses support SSE streaming (via `futures_util::StreamExt` in `api/completions.rs`) as well as non-streaming
 - Tests use in-memory SQLite databases
-- Docker tests are marked #[ignore] for CI without Docker
 - Use `tokio::sync::Mutex` and `tokio::sync::RwLock`, NOT `std::sync`
 - Use `HashRouter` not `BrowserRouter` (Tauri serves from custom protocol)
 - Import `tauri::Emitter` for `.emit()` and `tauri::Manager` for `.manage()`
 
 ## File Organization
-- Business logic: src-tauri/src/{identity,memory,permissions,sandbox}/
+- Business logic: src-tauri/src/{identity,memory,permissions}/
 - API layer: src-tauri/src/api/
 - Tauri commands: src-tauri/src/commands.rs
 - Frontend pages: src/pages/
@@ -48,7 +46,7 @@ Rust backend + React/TypeScript frontend + SQLite + Docker sandboxing.
 - Spawn depth limited: children cannot spawn, global cap of 10 agents
 - Request body limit: 10MB
 - Spending caps enforced before LLM calls
-- Tools execute directly on host (Docker removed)
+- Tools execute directly on host.
 
 ## Known Limitations
 - Private keys stored unencrypted in SQLite (encrypt via keyring crate in future)

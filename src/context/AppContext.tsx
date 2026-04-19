@@ -1,18 +1,16 @@
 import React, { createContext, useContext, useReducer, useEffect } from 'react';
 import type { Agent, AppConfig } from '../lib/types';
-import { getAgents, getConfig, getDockerStatus } from '../lib/invoke';
+import { getAgents, getConfig } from '../lib/invoke';
 
 interface AppState {
   agents: Agent[];
   config: AppConfig | null;
-  dockerAvailable: boolean;
   loading: boolean;
 }
 
 type Action =
   | { type: 'SET_AGENTS'; agents: Agent[] }
   | { type: 'SET_CONFIG'; config: AppConfig }
-  | { type: 'SET_DOCKER'; available: boolean }
   | { type: 'SET_LOADING'; loading: boolean }
   | { type: 'ADD_AGENT'; agent: Agent }
   | { type: 'UPDATE_AGENT_STATUS'; id: string; status: string };
@@ -20,7 +18,6 @@ type Action =
 const initialState: AppState = {
   agents: [],
   config: null,
-  dockerAvailable: false,
   loading: true,
 };
 
@@ -30,8 +27,6 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, agents: action.agents };
     case 'SET_CONFIG':
       return { ...state, config: action.config };
-    case 'SET_DOCKER':
-      return { ...state, dockerAvailable: action.available };
     case 'SET_LOADING':
       return { ...state, loading: action.loading };
     case 'ADD_AGENT':
@@ -75,14 +70,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     async function init() {
       try {
-        const [agents, config, docker] = await Promise.all([
+        const [agents, config] = await Promise.all([
           getAgents(),
           getConfig(),
-          getDockerStatus(),
         ]);
         dispatch({ type: 'SET_AGENTS', agents });
         dispatch({ type: 'SET_CONFIG', config });
-        dispatch({ type: 'SET_DOCKER', available: docker.available });
       } catch (err) {
         console.error('Failed to initialize:', err);
       } finally {

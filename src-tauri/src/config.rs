@@ -5,7 +5,6 @@ use std::path::PathBuf;
 pub struct AppConfig {
     pub llm: LlmConfig,
     pub server: ServerConfig,
-    pub sandbox: SandboxConfig,
     pub ui: UiConfig,
     #[serde(default)]
     pub idle: IdleConfig,
@@ -28,15 +27,6 @@ pub struct LlmConfig {
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SandboxConfig {
-    pub image: String,
-    pub cpu_limit_cores: f64,
-    pub memory_limit_mb: u64,
-    pub timeout_seconds: u64,
-    pub network_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,13 +82,6 @@ impl Default for AppConfig {
             server: ServerConfig {
                 host: "127.0.0.1".into(),
                 port: 9000,
-            },
-            sandbox: SandboxConfig {
-                image: "python:3.12-slim".into(),
-                cpu_limit_cores: 1.0,
-                memory_limit_mb: 512,
-                timeout_seconds: 300,
-                network_enabled: false,
             },
             ui: UiConfig {
                 onboarding_complete: false,
@@ -173,7 +156,6 @@ mod tests {
         let loaded: AppConfig =
             toml::from_str(&std::fs::read_to_string(&path).expect("read")).expect("parse");
         assert_eq!(loaded.llm.default_model, "gpt-4o");
-        assert_eq!(loaded.sandbox.memory_limit_mb, 512);
     }
 
     #[test]
@@ -181,7 +163,5 @@ mod tests {
         let config = AppConfig::default();
         assert_eq!(config.llm.api_key, "");
         assert_eq!(config.server.host, "127.0.0.1");
-        assert_eq!(config.sandbox.image, "python:3.12-slim");
-        assert!(!config.sandbox.network_enabled);
     }
 }

@@ -45,10 +45,6 @@ export async function saveConfig(config: AppConfig): Promise<void> {
   return invoke<void>('save_config', { config });
 }
 
-export async function getDockerStatus(): Promise<{ available: boolean }> {
-  return invoke<{ available: boolean }>('get_docker_status');
-}
-
 export async function getActivityFeed(
   limit: number = 50
 ): Promise<AuditEntry[]> {

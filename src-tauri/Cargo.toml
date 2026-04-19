@@ -34,7 +34,7 @@ rand = "0.8"
 base64 = "0.22"
 sha2 = "0.10"
 
-# Async stream utilities (needed for bollard streams)
+# Async stream utilities (used for SSE streaming in api/completions.rs)
 futures-util = "0.3"
 
 # Utilities

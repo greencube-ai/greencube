@@ -28,16 +28,6 @@ pub enum GreenCubeError {
     #[error("LLM API unreachable: {0}")]
     LlmUnreachable(String),
 
-    // Sandbox errors
-    #[error("Docker not available")]
-    DockerNotAvailable,
-
-    #[error("Sandbox error: {0}")]
-    SandboxError(String),
-
-    #[error("Sandbox timeout after {0} seconds")]
-    SandboxTimeout(u64),
-
     // Permission errors
     #[error("Permission denied: {0}")]
     PermissionDenied(String),
@@ -74,9 +64,6 @@ impl axum::response::IntoResponse for GreenCubeError {
             GreenCubeError::DuplicateAgent(_) => (StatusCode::CONFLICT, self.to_string()),
             GreenCubeError::PermissionDenied(_) => (StatusCode::FORBIDDEN, self.to_string()),
             GreenCubeError::SpendingCapExceeded => (StatusCode::FORBIDDEN, self.to_string()),
-            GreenCubeError::DockerNotAvailable => {
-                (StatusCode::SERVICE_UNAVAILABLE, self.to_string())
-            }
             GreenCubeError::LlmUnreachable(_) => (StatusCode::BAD_GATEWAY, self.to_string()),
             GreenCubeError::LlmError(_) => (StatusCode::BAD_GATEWAY, self.to_string()),
             _ => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),

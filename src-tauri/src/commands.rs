@@ -110,12 +110,6 @@ pub async fn save_config(
 }
 
 #[tauri::command]
-pub async fn get_docker_status(_state: State<'_, Arc<AppState>>) -> Result<serde_json::Value> {
-    // Docker removed — tools run directly on host
-    Ok(serde_json::json!({ "available": true }))
-}
-
-#[tauri::command]
 pub async fn get_server_info(state: State<'_, Arc<AppState>>) -> Result<serde_json::Value> {
     Ok(serde_json::json!({
         "port": state.actual_port,

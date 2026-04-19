@@ -54,13 +54,6 @@ export interface AppConfig {
     host: string;
     port: number;
   };
-  sandbox: {
-    image: string;
-    cpu_limit_cores: number;
-    memory_limit_mb: number;
-    timeout_seconds: number;
-    network_enabled: boolean;
-  };
   ui: {
     onboarding_complete: boolean;
     alive_mode: boolean;
@@ -78,10 +71,6 @@ export interface KnowledgeEntry {
   last_used_at?: string;
   use_count: number;
   valence: number; // -2 to +2: emotional memory
-}
-
-export interface DockerStatus {
-  available: boolean;
 }
 
 export interface Notification {

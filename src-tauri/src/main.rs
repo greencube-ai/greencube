@@ -332,7 +332,6 @@ fn main() {
             commands::get_activity_feed,
             commands::get_config,
             commands::save_config,
-            commands::get_docker_status,
             commands::get_server_info,
             commands::reset_app,
             commands::get_agent_lineage,

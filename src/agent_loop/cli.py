@@ -16,6 +16,7 @@ def main():
     parser.add_argument("--full", action="store_true", help="Set runs=20 for a full experiment.")
     parser.add_argument("--confirm-cost", action="store_true", help="Required to proceed past cost projection.")
     parser.add_argument("--output", default="agent_loop_results.jsonl", help="JSONL output path.")
+    parser.add_argument("--traces-output", default=None, help="Optional JSONL path for full per-run traces.")
     parser.add_argument("--tasks", default=None, help="Comma-separated task names to run (default: all).")
     args = parser.parse_args()
 
@@ -40,7 +41,13 @@ def main():
         sys.exit(0)
 
     agent = OpenAIAgent(model="gpt-4o-mini")
-    records = run_all(agent, runs, output_path=args.output, task_filter=task_filter)
+    records = run_all(
+        agent,
+        runs,
+        output_path=args.output,
+        task_filter=task_filter,
+        traces_path=args.traces_output,
+    )
     summary = print_results(records)
 
     summary_path = args.output.replace(".jsonl", ".summary.json")
