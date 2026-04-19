@@ -127,7 +127,7 @@ async fn start_greencube_api(state: Arc<crate::state::AppState>) -> String {
 ///
 /// Flow:
 /// 1. Create agent
-/// 2. Send completion request mentioning "Stripe API" → mock returns tool_call → Docker fails → mock returns final text
+/// 2. Send completion request mentioning "Stripe API" → mock returns tool_call → tool execution fails → mock returns final text
 /// 3. Verify audit log has tool_call entry
 /// 4. Verify episodes were created
 /// 5. Send SECOND request mentioning "Stripe"
@@ -343,5 +343,5 @@ async fn test_health_endpoint() {
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["status"], "ok");
     assert_eq!(body["version"], "1.0.0");
-    // Docker removed — health only returns status + version
+    // Health endpoint only returns status + version
 }

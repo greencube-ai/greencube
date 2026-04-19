@@ -1401,17 +1401,17 @@ fn inject_memories(messages: &mut Vec<serde_json::Value>, memories: &[Episode]) 
 /// Build OpenAI-format tool definitions for the agent's allowed tools.
 fn build_tool_definitions(tools_allowed: &[String]) -> Vec<serde_json::Value> {
     let all_tools: Vec<(&str, &str, serde_json::Value)> = vec![
-        ("shell", "Execute a shell command in a sandboxed Docker container. Use this for running code, scripts, or system commands.", serde_json::json!({
+        ("shell", "Execute a shell command directly on the host machine. The output is returned to you.", serde_json::json!({
             "type": "object",
             "properties": {"command": {"type": "string", "description": "The shell command to execute"}},
             "required": ["command"]
         })),
-        ("read_file", "Read the contents of a file in the sandbox.", serde_json::json!({
+        ("read_file", "Read the contents of a file on the host filesystem. The contents are returned to you.", serde_json::json!({
             "type": "object",
             "properties": {"path": {"type": "string", "description": "Path to the file to read"}},
             "required": ["path"]
         })),
-        ("write_file", "Write content to a file in the sandbox.", serde_json::json!({
+        ("write_file", "Write content to a file on the host filesystem. The file is created or overwritten.", serde_json::json!({
             "type": "object",
             "properties": {
                 "path": {"type": "string", "description": "Path to write to"},
