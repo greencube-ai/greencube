@@ -97,7 +97,7 @@ pub async fn execute_spawn(
     let domain = domain.to_lowercase().trim().to_string();
 
     // 1. VALIDATE (brief DB lock)
-    let (parent, provider, competence_entry, domain_knowledge, domain_feedback) = {
+    let (parent, provider, _competence_entry, domain_knowledge, domain_feedback) = {
         let db = state.db.lock().await;
 
         // Get parent

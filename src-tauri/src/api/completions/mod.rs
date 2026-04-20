@@ -1,9 +1,7 @@
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
-use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
-use axum::response::{IntoResponse, Response};
+use axum::response::Response;
 use axum::Json;
-use futures_util::StreamExt;
 use std::sync::Arc;
 use tauri::Emitter;
 
@@ -15,7 +13,6 @@ use crate::permissions::audit;
 use crate::permissions::audit::AuditEntry;
 use crate::state::AppState;
 use crate::task_outcome::TaskOutcome;
-use crate::competence;
 
 mod delegation;
 mod helpers;
@@ -31,7 +28,7 @@ use injection::{
     inject_preferences_and_corrections, inject_profile_goals_context, inject_relationship,
     inject_tools_and_hint,
 };
-use post_task::{finish_task, run_post_task};
+use post_task::finish_task;
 use streaming::stream_llm_response;
 use tools::execute_tool_call;
 
@@ -43,7 +40,6 @@ pub async fn chat_completions(
     Json(mut body): Json<serde_json::Value>,
 ) -> Response {
     let wants_stream = body["stream"].as_bool().unwrap_or(false);
-    let has_tools = body.get("tools").and_then(|t| t.as_array()).map_or(false, |a| !a.is_empty());
 
     // 1. RECEIVE REQUEST — extract agent_id
     let agent_id = headers

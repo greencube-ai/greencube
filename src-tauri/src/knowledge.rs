@@ -74,98 +74,6 @@ fn knowledge_from_row(row: &rusqlite::Row, offset: usize) -> rusqlite::Result<Kn
     })
 }
 
-/// Smart recall: try semantic similarity via Ollama, fall back to keyword matching.
-pub async fn recall_smart(
-    conn: &Connection,
-    agent_id: &str,
-    query: &str,
-    limit: i64,
-) -> anyhow::Result<Vec<KnowledgeEntry>> {
-    // Try Ollama embedding endpoint
-    if let Ok(results) = recall_semantic(conn, agent_id, query, limit).await {
-        if !results.is_empty() {
-            return Ok(results);
-        }
-    }
-    // Fall back to keyword matching
-    recall_relevant(conn, agent_id, query, limit)
-}
-
-/// Semantic recall using Ollama's embedding API.
-/// Returns empty vec if Ollama isn't running.
-async fn recall_semantic(
-    conn: &Connection,
-    agent_id: &str,
-    query: &str,
-    limit: i64,
-) -> anyhow::Result<Vec<KnowledgeEntry>> {
-    // Get query embedding from Ollama
-    let client = reqwest::Client::new();
-    let resp = client.post("http://localhost:11434/api/embeddings")
-        .json(&serde_json::json!({"model": "nomic-embed-text", "prompt": query}))
-        .timeout(std::time::Duration::from_secs(5))
-        .send()
-        .await?;
-
-    if !resp.status().is_success() {
-        anyhow::bail!("Ollama not available");
-    }
-
-    let body: serde_json::Value = resp.json().await?;
-    let query_embedding: Vec<f64> = body["embedding"]
-        .as_array()
-        .ok_or_else(|| anyhow::anyhow!("no embedding"))?
-        .iter()
-        .filter_map(|v| v.as_f64())
-        .collect();
-
-    if query_embedding.is_empty() {
-        anyhow::bail!("empty embedding");
-    }
-
-    // Get all knowledge for this agent and compute cosine similarity
-    let all = list_knowledge(conn, agent_id, 200)?;
-    let mut scored: Vec<(f64, KnowledgeEntry)> = Vec::new();
-
-    for entry in all {
-        // Get embedding for this entry (cache would be better but this works for now)
-        let entry_resp = client.post("http://localhost:11434/api/embeddings")
-            .json(&serde_json::json!({"model": "nomic-embed-text", "prompt": &entry.content}))
-            .timeout(std::time::Duration::from_secs(5))
-            .send()
-            .await;
-
-        if let Ok(resp) = entry_resp {
-            if let Ok(body) = resp.json::<serde_json::Value>().await {
-                let entry_embedding: Vec<f64> = body["embedding"]
-                    .as_array()
-                    .unwrap_or(&vec![])
-                    .iter()
-                    .filter_map(|v| v.as_f64())
-                    .collect();
-
-                if entry_embedding.len() == query_embedding.len() {
-                    let similarity = cosine_similarity(&query_embedding, &entry_embedding);
-                    if similarity > 0.7 {
-                        scored.push((similarity, entry));
-                    }
-                }
-            }
-        }
-    }
-
-    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    Ok(scored.into_iter().take(limit as usize).map(|(_, e)| e).collect())
-}
-
-fn cosine_similarity(a: &[f64], b: &[f64]) -> f64 {
-    let dot: f64 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-    let mag_a: f64 = a.iter().map(|x| x * x).sum::<f64>().sqrt();
-    let mag_b: f64 = b.iter().map(|x| x * x).sum::<f64>().sqrt();
-    if mag_a == 0.0 || mag_b == 0.0 { return 0.0; }
-    dot / (mag_a * mag_b)
-}
-
 /// Recall relevant knowledge using keyword matching + relevance scoring.
 /// Filters out stale entries (score < 0.2). Returns max `limit` entries (capped at 10).
 pub fn recall_relevant(
@@ -264,18 +172,6 @@ fn compute_relevance_score(entry: &KnowledgeEntry, now: &chrono::DateTime<chrono
     let success_score = (entry.success_when_used as f64).min(10.0) / 10.0; // normalize 0-1, cap at 10
 
     (use_score * 0.3) + (success_score * 0.5) + (recency * 0.2)
-}
-
-/// Bump success_when_used for all knowledge entries that were recently injected for this agent.
-/// Called after self-verify rates "good".
-pub fn bump_success_for_recent(conn: &Connection, agent_id: &str) -> anyhow::Result<()> {
-    // Bump entries used in the last hour (recently injected into a task)
-    let cutoff = (chrono::Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
-    conn.execute(
-        "UPDATE knowledge SET success_when_used = success_when_used + 1 WHERE agent_id = ?1 AND last_used_at > ?2",
-        params![agent_id, cutoff],
-    )?;
-    Ok(())
 }
 
 /// Mark entries with relevance score < 0.1 as stale. Never deleted, just not injected.

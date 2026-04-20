@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
 use crate::knowledge;
-use crate::notifications;
 use crate::providers::Provider;
 use crate::state::AppState;
 
@@ -57,6 +56,8 @@ pub fn insert_goal(conn: &Connection, agent_id: &str, content: &str) -> anyhow::
     Ok(Goal { id, agent_id: agent_id.into(), content: content.into(), status: "active".into(), progress_notes: None, created_at: now.clone(), updated_at: now })
 }
 
+// Creature-era module, frozen. See STATUS.md. Retained for potential revival.
+#[allow(dead_code)]
 pub fn update_goal_status(conn: &Connection, id: &str, status: &str, notes: Option<&str>) -> anyhow::Result<()> {
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute(

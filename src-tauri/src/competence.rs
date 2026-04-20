@@ -76,17 +76,6 @@ pub fn update_competence(
     Ok(())
 }
 
-/// Adjust confidence from feedback (praise +0.05, correction -0.05).
-pub fn adjust_confidence(conn: &Connection, agent_id: &str, domain: &str, delta: f64) -> anyhow::Result<()> {
-    let domain = domain.to_lowercase();
-    let now = chrono::Utc::now().to_rfc3339();
-    conn.execute(
-        "UPDATE competence_map SET confidence = MIN(1.0, MAX(0.0, confidence + ?1)), last_assessed = ?2 WHERE agent_id = ?3 AND domain = ?4",
-        params![delta, now, agent_id, domain],
-    )?;
-    Ok(())
-}
-
 pub fn get_competence_map(conn: &Connection, agent_id: &str) -> anyhow::Result<Vec<CompetenceEntry>> {
     let mut stmt = conn.prepare(
         "SELECT domain, confidence, task_count, success_count, trend, last_assessed
@@ -113,22 +102,6 @@ pub fn get_most_recent_domain(conn: &Connection, agent_id: &str) -> anyhow::Resu
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.into()),
     }
-}
-
-/// Get domains where the agent has <50% confidence with 3+ tasks. These are honest limitations.
-/// Tied to commandment 2 (never lie) and commandment 9 (flag uncertainty).
-pub fn get_limitations(conn: &Connection, agent_id: &str) -> anyhow::Result<Vec<String>> {
-    let mut stmt = conn.prepare(
-        "SELECT domain, CAST(confidence * 100 AS INTEGER) FROM competence_map
-         WHERE agent_id = ?1 AND confidence < 0.5 AND task_count >= 3
-         ORDER BY confidence ASC"
-    )?;
-    let limitations = stmt.query_map(params![agent_id], |row| {
-        let domain: String = row.get(0)?;
-        let pct: i64 = row.get(1)?;
-        Ok(format!("{} ({}% success rate)", domain, pct))
-    })?.collect::<Result<Vec<_>, _>>()?;
-    Ok(limitations)
 }
 
 #[cfg(test)]
@@ -160,27 +133,4 @@ mod tests {
         assert_eq!(map[0].trend, "declining");
     }
 
-    #[test]
-    fn test_limitations() {
-        let conn = init_memory_database().expect("init");
-        let agent = create_agent(&conn, "Bot", "", &["shell".into()]).expect("create");
-        // Create a domain with low confidence and enough tasks
-        update_competence(&conn, &agent.id, "css", false, Some(0.2)).expect("u1");
-        update_competence(&conn, &agent.id, "css", false, Some(0.2)).expect("u2");
-        update_competence(&conn, &agent.id, "css", true, Some(0.3)).expect("u3");
-        let limits = get_limitations(&conn, &agent.id).expect("get");
-        assert!(!limits.is_empty());
-        assert!(limits[0].contains("css"));
-    }
-
-    #[test]
-    fn test_adjust_confidence() {
-        let conn = init_memory_database().expect("init");
-        let agent = create_agent(&conn, "Bot", "", &["shell".into()]).expect("create");
-        update_competence(&conn, &agent.id, "python", true, Some(0.7)).expect("initial");
-        let before = get_competence_map(&conn, &agent.id).expect("get")[0].confidence;
-        adjust_confidence(&conn, &agent.id, "python", 0.05).expect("adjust");
-        let after = get_competence_map(&conn, &agent.id).expect("get")[0].confidence;
-        assert!(after > before);
-    }
 }

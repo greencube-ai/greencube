@@ -1,6 +1,4 @@
-use std::sync::Arc;
 use rusqlite::{params, Connection};
-use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
 use crate::identity::registry;
@@ -9,18 +7,6 @@ use crate::providers;
 use crate::state::AppState;
 
 const MAX_ACTIVE_FORKS: i64 = 2;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ForkRecord {
-    pub id: String,
-    pub parent_id: String,
-    pub branch_label: String,
-    pub branch_description: String,
-    pub task_id: String,
-    pub response: Option<String>,
-    pub selected: bool,
-    pub created_at: String,
-}
 
 /// Execute a fork: create two temporary branches, run both, pick the winner.
 pub async fn execute_fork(

@@ -33,15 +33,6 @@ pub fn record_signal(conn: &Connection, agent_id: &str, user_id: &str, positive:
     Ok(())
 }
 
-/// Update relationship notes (called from reflection when user preferences are learned).
-pub fn update_notes(conn: &Connection, agent_id: &str, user_id: &str, note: &str) -> anyhow::Result<()> {
-    conn.execute(
-        "UPDATE relationships SET notes = ?1 WHERE agent_id = ?2 AND user_identifier = ?3",
-        params![note, agent_id, user_id],
-    )?;
-    Ok(())
-}
-
 /// Get relationship context for injection into prompts.
 pub fn get_relationship_prompt(conn: &Connection, agent_id: &str, user_id: &str) -> Option<String> {
     let result = conn.query_row(

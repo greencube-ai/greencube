@@ -1,6 +1,8 @@
 use rusqlite::{params, Connection};
 
 /// Calculate mood based on recent task history.
+// Creature-era module, frozen. See STATUS.md. Retained for potential revival.
+#[allow(dead_code)]
 pub fn calculate_mood(conn: &Connection, agent_id: &str) -> String {
     // Get last 10 episodes outcomes
     let mut stmt = conn.prepare(
@@ -41,6 +43,8 @@ pub fn calculate_mood(conn: &Connection, agent_id: &str) -> String {
 }
 
 /// Get the system prompt injection for the current mood.
+// Creature-era module, frozen. See STATUS.md. Retained for potential revival.
+#[allow(dead_code)]
 pub fn mood_prompt(mood: &str) -> &'static str {
     match mood {
         "thriving" => "\n\nYou've been performing excellently. Feel free to try creative approaches.",
@@ -52,6 +56,8 @@ pub fn mood_prompt(mood: &str) -> &'static str {
 }
 
 /// Update the agent's mood in the database.
+// Creature-era module, frozen. See STATUS.md. Retained for potential revival.
+#[allow(dead_code)]
 pub fn update_mood(conn: &Connection, agent_id: &str) -> String {
     let mood = calculate_mood(conn, agent_id);
     let _ = conn.execute(

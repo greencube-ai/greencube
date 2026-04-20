@@ -51,7 +51,7 @@ pub fn get_provider(conn: &Connection, id: &str) -> anyhow::Result<Option<Provid
     let mut stmt = conn.prepare(
         "SELECT id, name, api_base_url, api_key, default_model, provider_type, created_at FROM providers WHERE id = ?1"
     )?;
-    let mut rows = stmt.query_map(params![id], |row| {
+    let rows = stmt.query_map(params![id], |row| {
         Ok(Provider {
             id: row.get(0)?, name: row.get(1)?, api_base_url: row.get(2)?,
             api_key: row.get(3)?, default_model: row.get(4)?, provider_type: row.get(5)?,
@@ -66,7 +66,7 @@ pub fn get_default_provider(conn: &Connection) -> anyhow::Result<Option<Provider
     let mut stmt = conn.prepare(
         "SELECT id, name, api_base_url, api_key, default_model, provider_type, created_at FROM providers ORDER BY created_at ASC LIMIT 1"
     )?;
-    let mut rows = stmt.query_map([], |row| {
+    let rows = stmt.query_map([], |row| {
         Ok(Provider {
             id: row.get(0)?, name: row.get(1)?, api_base_url: row.get(2)?,
             api_key: row.get(3)?, default_model: row.get(4)?, provider_type: row.get(5)?,

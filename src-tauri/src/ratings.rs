@@ -26,15 +26,6 @@ pub fn get_approval_rate(conn: &Connection, agent_id: &str, last_n: i64) -> anyh
     Ok(positive as f64 / total as f64)
 }
 
-/// Check if a specific task was rated positively (for knowledge weighting).
-pub fn get_task_rating(conn: &Connection, task_id: &str) -> Option<i32> {
-    conn.query_row(
-        "SELECT rating FROM response_ratings WHERE task_id = ?1 ORDER BY created_at DESC LIMIT 1",
-        params![task_id],
-        |row| row.get(0),
-    ).ok()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -52,12 +43,4 @@ mod tests {
         assert!((rate - 0.666).abs() < 0.01);
     }
 
-    #[test]
-    fn test_get_task_rating() {
-        let conn = init_memory_database().expect("init");
-        let agent = create_agent(&conn, "Bot", "", &["shell".into()]).expect("create");
-        rate_response(&conn, &agent.id, "task1", 1).expect("rate");
-        assert_eq!(get_task_rating(&conn, "task1"), Some(1));
-        assert_eq!(get_task_rating(&conn, "task99"), None);
-    }
 }

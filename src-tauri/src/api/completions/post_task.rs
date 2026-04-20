@@ -93,7 +93,7 @@ pub(super) async fn run_post_task(
     drop(config);
 
     if let (Some(provider), Some(msgs)) = (provider, messages) {
-        let (total_tasks, active_goal_count) = {
+        let (total_tasks, _active_goal_count) = {
             let db = state.db.lock().await;
             let total = registry::get_agent(&db, agent_id).ok().flatten().map(|a| a.total_tasks).unwrap_or(0);
             let goals = crate::goals::count_active_goals(&db, agent_id).unwrap_or(0);

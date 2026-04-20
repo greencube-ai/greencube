@@ -3,10 +3,7 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
-use crate::memory::episodic;
-use crate::knowledge;
 use crate::goals;
-use crate::agent_messages;
 use crate::providers::Provider;
 use crate::state::AppState;
 
@@ -41,6 +38,8 @@ pub fn get_latest_journal(conn: &Connection, agent_id: &str) -> anyhow::Result<O
 
 /// Check if the agent should write a journal entry now.
 /// Triggers: every 3rd task today, or idle thinker after 6PM with no entry today.
+// Creature-era module, frozen. See STATUS.md. Retained for potential revival.
+#[allow(dead_code)]
 pub fn should_write_journal(conn: &Connection, agent_id: &str) -> bool {
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
 
@@ -71,6 +70,8 @@ pub fn should_write_journal(conn: &Connection, agent_id: &str) -> bool {
     today_tasks >= 3 && today_tasks % 3 == 0
 }
 
+// Creature-era module, frozen. See STATUS.md. Retained for potential revival.
+#[allow(dead_code)]
 pub fn spawn_journal_synthesis(state: Arc<AppState>, agent_id: String, provider: Provider) {
     tokio::spawn(async move {
         if let Err(e) = write_journal(&state, &agent_id, &provider).await {
@@ -79,6 +80,8 @@ pub fn spawn_journal_synthesis(state: Arc<AppState>, agent_id: String, provider:
     });
 }
 
+// Creature-era module, frozen. See STATUS.md. Retained for potential revival.
+#[allow(dead_code)]
 async fn write_journal(state: &AppState, agent_id: &str, provider: &Provider) -> anyhow::Result<()> {
     // Budget check — read config before db lock to avoid deadlock
     let budget = state.config.read().await.cost.daily_background_token_budget;

@@ -190,7 +190,6 @@ pub(super) async fn inject_keyword_knowledge(
         if let Some(messages) = body["messages"].as_array_mut() {
             if let Some(last_user_msg) = messages.iter().rev().find(|m| m["role"] == "user").and_then(|m| m["content"].as_str()) {
                 let db = state.db.lock().await;
-                // Keyword matching for inline recall (semantic search available for batch via recall_smart)
                 let knowledge = crate::knowledge::recall_relevant(&db, &agent.id, last_user_msg, 10).unwrap_or_default();
                 if !knowledge.is_empty() {
                     // Track: facts used in tasks
