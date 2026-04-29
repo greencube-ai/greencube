@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use llama_cpp_2::{
     llama_backend::LlamaBackend,
@@ -65,7 +65,7 @@ pub struct AppState {
     /// Full path to the GGUF file on disk.
     pub model_path: String,
     /// The loaded model, initialized on first message to keep startup fast.
-    pub loaded: Mutex<Option<LoadedModel>>,
+    pub loaded: Arc<Mutex<Option<LoadedModel>>>,
 }
 
 // --- Commands ---
@@ -133,32 +133,50 @@ pub fn send_message_streaming(
     app: AppHandle,
 ) -> Result<(), String> {
     if state.model_path.is_empty() {
-        app.emit("chat-error", "No model file found in C:\\models")
-            .ok();
+        app.emit("chat-error", "No model file found in C:\\models").ok();
         return Err("No model available".to_string());
     }
 
-    let mut guard = state
-        .loaded
-        .lock()
-        .map_err(|e| format!("Failed to acquire model lock: {e}"))?;
+    let model_path = state.model_path.clone();
+    let loaded = state.loaded.clone();
 
-    if guard.is_none() {
-        log::info!("Loading model: {}", state.model_path);
-        *guard = Some(load_model_with_fallback(&state.model_path).map_err(|e| {
-            app.emit("chat-error", &e).ok();
-            e
-        })?);
-    }
+    // Spawn on a background thread so the UI stays responsive while the
+    // model loads and generates. The command returns immediately.
+    std::thread::spawn(move || {
+        let mut guard = match loaded.lock() {
+            Ok(g) => g,
+            Err(e) => {
+                app.emit("chat-error", format!("Lock error: {e}")).ok();
+                return;
+            }
+        };
 
-    let loaded = guard.as_ref().unwrap();
+        if guard.is_none() {
+            log::info!("Loading model: {model_path}");
+            match load_model_with_fallback(&model_path) {
+                Ok(m) => *guard = Some(m),
+                Err(e) => {
+                    app.emit("chat-error", &e).ok();
+                    return;
+                }
+            }
+        }
 
-    crate::inference::generate_streaming(&loaded.backend, &loaded.model, &apply_chat_template(&prompt), 1024, |token| {
-        app.emit("chat-token", token).ok();
-    })
-    .map_err(|e| format!("Inference failed: {e}"))?;
+        let loaded = guard.as_ref().unwrap();
+        let result = crate::inference::generate_streaming(
+            &loaded.backend,
+            &loaded.model,
+            &apply_chat_template(&prompt),
+            1024,
+            |token| { app.emit("chat-token", token).ok(); },
+        );
 
-    app.emit("chat-done", ()).ok();
+        match result {
+            Ok(()) => { app.emit("chat-done", ()).ok(); }
+            Err(e) => { app.emit("chat-error", e.to_string()).ok(); }
+        }
+    });
+
     Ok(())
 }
 

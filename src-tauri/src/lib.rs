@@ -29,7 +29,7 @@ pub fn run() {
             app.manage(commands::AppState {
                 model_name,
                 model_path,
-                loaded: std::sync::Mutex::new(None),
+                loaded: std::sync::Arc::new(std::sync::Mutex::new(None)),
             });
 
             Ok(())
