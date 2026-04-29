@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell($env:PATH = \"C:\\\\Program Files\\\\CMake\\\\bin;\" + $env:PATH; $env:LIBCLANG_PATH = \"C:\\\\Program Files\\\\LLVM\\\\bin\"; Set-Location \"C:\\\\Users\\\\mateu\\\\greencube\\\\greencube\\\\src-tauri\"; cargo build 2>&1)",
+      "PowerShell(Get-Item \"C:\\\\models\\\\microsoft_Phi-4-mini-instruct-Q4_K_M\\\\Phi-4-mini-instruct-Q4_K_M.gguf\" | Select-Object Name, @{N=\"Size MB\";E={[math]::Round\\($_.Length/1MB,1\\)}})",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\models\" -Recurse | Select-Object FullName, @{N=\"Size MB\";E={[math]::Round\\($_.Length/1MB,1\\)}})",
+      "PowerShell(Get-PSDrive C | Select-Object @{N=\"Free GB\";E={[math]::Round\\($_.Free/1GB,2\\)}}, @{N=\"Used GB\";E={[math]::Round\\($_.Used/1GB,2\\)}})",
+      "PowerShell(Get-WmiObject -Class Win32_LogicalDisk -Filter \"DeviceID='C:'\" | Select-Object @{N=\"Free GB\";E={[math]::Round\\($_.FreeSpace/1GB,2\\)}}, @{N=\"Total GB\";E={[math]::Round\\($_.Size/1GB,2\\)}})",
+      "PowerShell(Get-ChildItem \"C:\\\\models\" -Recurse -Force | Measure-Object -Property Length -Sum | Select-Object @{N=\"Total MB\";E={[math]::Round\\($_.Sum/1MB,1\\)}})",
+      "Read(//c/models/**)",
+      "PowerShell(cmd /c \"dir C:\\\\models /s /b\")",
+      "PowerShell(cmd /c \"dir C:\\\\models\")",
+      "PowerShell(cmd /c \"taskkill /F /IM hf.exe\" 2>&1)",
+      "PowerShell($env:PATH = \"C:\\\\Program Files\\\\CMake\\\\bin;\" + $env:PATH; $env:LIBCLANG_PATH = \"C:\\\\Program Files\\\\LLVM\\\\bin\"; Set-Location \"C:\\\\Users\\\\mateu\\\\greencube\\\\greencube\\\\src-tauri\"; cargo build 2>&1 | Select-String -Pattern \"^error|Finished|Compiling app\" | Select-Object -Last 20)",
+      "PowerShell(Get-WmiObject Win32_VideoController)",
+      "PowerShell(cmd /c \"wmic path win32_VideoController get name,DriverVersion\")",
+      "Read(//c//**)",
+      "PowerShell(Get-ChildItem \"C:\\\\VulkanSDK\" -ErrorAction SilentlyContinue; Get-ChildItem \"$env:VULKAN_SDK\" -ErrorAction SilentlyContinue | Select-Object -First 5 Name)",
+      "Read(//c/VulkanSDK/**)",
+      "Read(//c/Users/mateu/Downloads/**)",
+      "PowerShell(Start-Process -FilePath \"C:\\\\Users\\\\mateu\\\\Downloads\\\\vulkansdk-windows-X64-1.4.341.1.exe\" -ArgumentList \"--accept-licenses --default-answer --confirm-command install\" -Wait -PassThru)",
+      "PowerShell(Start-Process -FilePath \"C:\\\\Users\\\\mateu\\\\Downloads\\\\vulkansdk-windows-X64-1.4.341.1.exe\" -ArgumentList \"install --accept-licenses --default-answer --confirm-command --root C:\\\\VulkanSDK\\\\1.4.341.1\" -Wait)",
+      "PowerShell(winget install KhronosGroup.VulkanSDK --accept-package-agreements --accept-source-agreements 2>&1)",
+      "PowerShell($env:PATH = \"C:\\\\Program Files\\\\CMake\\\\bin;\" + $env:PATH; $env:LIBCLANG_PATH = \"C:\\\\Program Files\\\\LLVM\\\\bin\"; Set-Location \"C:\\\\Users\\\\mateu\\\\greencube\\\\greencube\\\\src-tauri\"; cargo build 2>&1 | Select-String -Pattern \"^error|Finished|Compiling app\" | Select-Object -Last 10)",
+      "PowerShell($env:PATH = \"C:\\\\Program Files\\\\CMake\\\\bin;\" + $env:PATH; $env:LIBCLANG_PATH = \"C:\\\\Program Files\\\\LLVM\\\\bin\"; Set-Location \"C:\\\\Users\\\\mateu\\\\greencube\\\\greencube\"; npm run tauri dev 2>&1)"
+    ]
+  }
+}
