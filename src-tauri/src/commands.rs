@@ -7,7 +7,7 @@ use llama_cpp_2::{
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
-use crate::{hardware, models};
+use crate::{db, hardware, models};
 
 // --- App state (lives for the entire duration the app is running) ---
 
@@ -23,13 +23,25 @@ pub(crate) struct LoadedModel {
 unsafe impl Send for LoadedModel {}
 unsafe impl Sync for LoadedModel {}
 
-/// Wrap a user message in the ChatML format that Qwen3 (and Llama 3) expect.
-/// Without this the model doesn't know where its turn ends, so it keeps
-/// generating — inventing more "user" messages and answering them itself.
-fn apply_chat_template(user_message: &str) -> String {
-    format!(
-        "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n{user_message}<|im_end|>\n<|im_start|>assistant\n"
-    )
+/// Build the full ChatML prompt from conversation history + new user message.
+/// Prior turns are included so the model has full context of the conversation.
+fn apply_chat_template(history: &[db::StoredMessage], new_user_message: &str) -> String {
+    let mut prompt =
+        String::from("<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n");
+    for msg in history {
+        let role = match msg.role.as_str() {
+            "assistant" => "assistant",
+            _ => "user",
+        };
+        prompt.push_str(&format!(
+            "<|im_start|>{role}\n{}<|im_end|>\n",
+            msg.content
+        ));
+    }
+    prompt.push_str(&format!(
+        "<|im_start|>user\n{new_user_message}<|im_end|>\n<|im_start|>assistant\n"
+    ));
+    prompt
 }
 
 /// Load a model from disk, trying GPU acceleration first and falling back to
@@ -66,6 +78,8 @@ pub struct AppState {
     pub model_path: String,
     /// The loaded model, initialized on first message to keep startup fast.
     pub loaded: Arc<Mutex<Option<LoadedModel>>>,
+    /// SQLite conversation history database.
+    pub db: Arc<Mutex<db::Db>>,
 }
 
 // --- Commands ---
@@ -78,7 +92,6 @@ pub struct ModelInfo {
 }
 
 /// Returns which model is currently selected and where it lives on disk.
-/// The frontend can use this to display "Running Qwen3 14B" in the UI.
 #[tauri::command]
 pub fn get_model_info(state: State<AppState>) -> ModelInfo {
     ModelInfo {
@@ -87,62 +100,71 @@ pub fn get_model_info(state: State<AppState>) -> ModelInfo {
     }
 }
 
-/// Send a message to the AI and get a response.
-///
-/// The model is loaded from disk on the first call, then kept in memory
-/// for all subsequent calls. This makes the first message slow (~10-30s)
-/// but every message after that fast (~1-5s).
-///
-/// Streaming (word-by-word output) comes in Phase 4.
-#[tauri::command]
-pub fn send_message(prompt: String, state: State<AppState>) -> Result<String, String> {
-    if state.model_path.is_empty() {
-        return Err("No model file found in C:\\models. Download a model first.".to_string());
-    }
-
-    let mut guard = state
-        .loaded
-        .lock()
-        .map_err(|e| format!("Failed to acquire model lock: {e}"))?;
-
-    if guard.is_none() {
-        log::info!("Loading model: {}", state.model_path);
-        *guard = Some(load_model_with_fallback(&state.model_path)?);
-    }
-
-    let loaded = guard.as_ref().unwrap();
-
-    crate::inference::generate_with(&loaded.backend, &loaded.model, &apply_chat_template(&prompt), 1024)
-        .map_err(|e| format!("Inference failed: {e}"))
-}
-
 /// Streaming version of send_message.
 ///
-/// Instead of returning the full response at the end, this command emits
-/// one Tauri event per token as the model generates them:
+/// Accepts an optional `conversation_id`. When omitted a new conversation is
+/// created and its id is returned so the frontend can track it.
 ///
-///   "chat-token"  — payload: String (one text fragment, e.g. " Paris")
-///   "chat-done"   — payload: null (signals the response is complete)
-///   "chat-error"  — payload: String (error message, if something went wrong)
+/// Events emitted during generation:
+///   "chat-token"  — payload: String  (one text fragment)
+///   "chat-done"   — payload: null    (generation complete)
+///   "chat-error"  — payload: String  (error message)
 ///
-/// The frontend should listen for these events before calling this command.
+/// Returns the conversation id (new or existing) synchronously before
+/// the background thread starts, so the frontend can update its state
+/// immediately without waiting for the first token.
 #[tauri::command]
 pub fn send_message_streaming(
     prompt: String,
+    conversation_id: Option<String>,
     state: State<AppState>,
     app: AppHandle,
-) -> Result<(), String> {
+) -> Result<String, String> {
     if state.model_path.is_empty() {
         app.emit("chat-error", "No model file found in C:\\models").ok();
         return Err("No model available".to_string());
     }
 
+    // Resolve or create the conversation synchronously (very fast).
+    let conv_id = {
+        let db = state
+            .db
+            .lock()
+            .map_err(|e| format!("DB lock error: {e}"))?;
+        match conversation_id {
+            Some(id) => id,
+            None => {
+                let title: String = prompt.chars().take(60).collect();
+                let title = if prompt.chars().count() > 60 {
+                    format!("{title}...")
+                } else {
+                    title
+                };
+                db.create_conversation(&title)
+                    .map_err(|e| format!("Failed to create conversation: {e}"))?
+            }
+        }
+    };
+
     let model_path = state.model_path.clone();
     let loaded = state.loaded.clone();
+    let db_arc = state.db.clone();
+    let conv_id_thread = conv_id.clone();
 
-    // Spawn on a background thread so the UI stays responsive while the
-    // model loads and generates. The command returns immediately.
     std::thread::spawn(move || {
+        // Load existing history before saving the new message so we don't
+        // include it twice when building the prompt.
+        let history = db_arc
+            .lock()
+            .ok()
+            .and_then(|db| db.load_messages(&conv_id_thread).ok())
+            .unwrap_or_default();
+
+        // Persist the new user message.
+        if let Ok(db) = db_arc.lock() {
+            db.add_message(&conv_id_thread, "user", &prompt).ok();
+        }
+
         let mut guard = match loaded.lock() {
             Ok(g) => g,
             Err(e) => {
@@ -162,28 +184,76 @@ pub fn send_message_streaming(
             }
         }
 
-        let loaded = guard.as_ref().unwrap();
+        let loaded_model = guard.as_ref().unwrap();
+        let full_prompt = apply_chat_template(&history, &prompt);
+
+        let mut full_response = String::new();
         let result = crate::inference::generate_streaming(
-            &loaded.backend,
-            &loaded.model,
-            &apply_chat_template(&prompt),
+            &loaded_model.backend,
+            &loaded_model.model,
+            &full_prompt,
             1024,
-            |token| { app.emit("chat-token", token).ok(); },
+            |token| {
+                full_response.push_str(&token);
+                app.emit("chat-token", token).ok();
+            },
         );
 
         match result {
-            Ok(()) => { app.emit("chat-done", ()).ok(); }
-            Err(e) => { app.emit("chat-error", e.to_string()).ok(); }
+            Ok(()) => {
+                if let Ok(db) = db_arc.lock() {
+                    db.add_message(&conv_id_thread, "assistant", &full_response)
+                        .ok();
+                }
+                app.emit("chat-done", ()).ok();
+            }
+            Err(e) => {
+                app.emit("chat-error", e.to_string()).ok();
+            }
         }
     });
 
-    Ok(())
+    Ok(conv_id)
+}
+
+// --- Conversation history commands ---
+
+/// Returns all conversations ordered by most recently updated.
+#[tauri::command]
+pub fn list_conversations(state: State<AppState>) -> Result<Vec<db::ConversationSummary>, String> {
+    state
+        .db
+        .lock()
+        .map_err(|e| format!("DB lock error: {e}"))?
+        .list_conversations()
+        .map_err(|e| e.to_string())
+}
+
+/// Returns all messages for a conversation in chronological order.
+#[tauri::command]
+pub fn load_conversation(id: String, state: State<AppState>) -> Result<Vec<db::StoredMessage>, String> {
+    state
+        .db
+        .lock()
+        .map_err(|e| format!("DB lock error: {e}"))?
+        .load_messages(&id)
+        .map_err(|e| e.to_string())
+}
+
+/// Deletes a conversation and all its messages.
+#[tauri::command]
+pub fn delete_conversation(id: String, state: State<AppState>) -> Result<(), String> {
+    state
+        .db
+        .lock()
+        .map_err(|e| format!("DB lock error: {e}"))?
+        .delete_conversation(&id)
+        .map_err(|e| e.to_string())
 }
 
 // --- Setup / first-run ---
 
 /// Returns true if no model has been downloaded yet.
-/// The frontend shows the setup/download screen when this is true.
 #[tauri::command]
 pub fn is_first_run() -> bool {
     models::list_model_statuses().iter().all(|m| !m.downloaded)
@@ -222,8 +292,6 @@ pub fn list_models() -> Vec<models::ModelStatus> {
 ///   "download-progress"  — { model_id, downloaded_bytes, total_bytes }
 ///   "download-complete"  — { model_id, path }
 ///   "download-error"     — { model_id, error }
-///
-/// `hf_token` is optional; pass it only for gated/private models.
 #[tauri::command]
 pub fn download_model(
     model_id: String,
@@ -242,7 +310,8 @@ pub fn download_model(
     let mid = model_id.clone();
 
     std::thread::spawn(move || {
-        if let Err(e) = run_download(&app, &mid, &url, &dest_path, size_hint, hf_token.as_deref()) {
+        if let Err(e) = run_download(&app, &mid, &url, &dest_path, size_hint, hf_token.as_deref())
+        {
             app.emit(
                 "download-error",
                 DownloadError {

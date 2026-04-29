@@ -19,28 +19,180 @@ const PHRASES = [
 
 interface Message {
   role: "user" | "assistant";
+  content: string; // raw, may contain <think>...</think>
+}
+
+interface StoredMessage {
+  id: number;
+  role: string;
   content: string;
 }
 
-export default function MainArea() {
+interface Props {
+  conversationId: string | null;
+  onConversationCreated: (id: string) => void;
+  onConversationUpdated: () => void;
+}
+
+// ---------------------------------------------------------------------------
+// Think-block parsing
+// ---------------------------------------------------------------------------
+
+interface Parsed {
+  thinking: string;
+  response: string;
+}
+
+function parseThink(raw: string): Parsed {
+  const start = raw.indexOf("<think>");
+  if (start === -1) return { thinking: "", response: raw };
+
+  const end = raw.indexOf("</think>");
+  if (end === -1) {
+    // Still inside the think block — everything after <think> is thinking.
+    return { thinking: raw.slice(start + 7), response: "" };
+  }
+
+  const thinking = raw.slice(start + 7, end);
+  const response = raw.slice(end + 8).replace(/^\n+/, "");
+  return { thinking, response };
+}
+
+// ---------------------------------------------------------------------------
+// ThinkSection — collapsible think block shown above assistant messages
+// ---------------------------------------------------------------------------
+
+function ThinkSection({
+  thinking,
+  defaultOpen = false,
+}: {
+  thinking: string;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <div className="mb-2">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1 text-[12px] text-ink-soft hover:text-ink cursor-pointer bg-transparent border-0 p-0 transition-colors"
+      >
+        <span className="text-[10px]">{open ? "▾" : "▸"}</span>
+        <span>Thought for a moment</span>
+      </button>
+      {open && (
+        <div className="mt-1 pl-3 border-l-2 border-[#DDD8CE] text-[13px] text-ink-soft italic whitespace-pre-wrap leading-relaxed">
+          {thinking}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// AssistantBubble — completed assistant message with optional think section
+// ---------------------------------------------------------------------------
+
+function AssistantBubble({ content }: { content: string }) {
+  const { thinking, response } = parseThink(content);
+  const displayText = response || content; // fallback if no closing tag
+
+  return (
+    <div className="max-w-[80%] px-4 py-3 rounded-xl text-[15px] bg-white text-ink border border-[#DDD8CE]">
+      {thinking && <ThinkSection thinking={thinking} defaultOpen={false} />}
+      <div className="whitespace-pre-wrap">{displayText}</div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// StreamingBubble — live bubble shown while the model is generating
+// ---------------------------------------------------------------------------
+
+function StreamingBubble({ raw }: { raw: string }) {
+  const { thinking, response } = parseThink(raw);
+
+  if (!raw) {
+    return (
+      <div className="max-w-[80%] px-4 py-3 rounded-xl text-[15px] bg-white text-ink border border-[#DDD8CE]">
+        <span className="animate-pulse text-ink-soft">●●●</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-[80%] px-4 py-3 rounded-xl text-[15px] bg-white text-ink border border-[#DDD8CE]">
+      {thinking && (
+        <div className="mb-2">
+          <div className="flex items-center gap-1 text-[12px] text-ink-soft mb-1">
+            <span className="animate-pulse">◌</span>
+            <span>Thinking...</span>
+          </div>
+          <div className="pl-3 border-l-2 border-[#DDD8CE] text-[13px] text-ink-soft italic whitespace-pre-wrap leading-relaxed">
+            {thinking}
+          </div>
+        </div>
+      )}
+      {response && (
+        <div className="whitespace-pre-wrap">{response}</div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// MainArea
+// ---------------------------------------------------------------------------
+
+export default function MainArea({
+  conversationId,
+  onConversationCreated,
+  onConversationUpdated,
+}: Props) {
   const [inputValue, setInputValue] = useState("");
   const [phraseIndex, setPhraseIndex] = useState(0);
   const [phraseVisible, setPhraseVisible] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
+
+  // Source of truth for the active conversation — may change from null to a
+  // UUID mid-session without causing a remount.
+  const activeConvId = useRef<string | null>(conversationId);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Rotating placeholder — only on home screen
+  // Load messages when mounted on an existing conversation.
+  useEffect(() => {
+    if (!conversationId) return;
+    invoke<StoredMessage[]>("load_conversation", { id: conversationId })
+      .then((msgs) =>
+        setMessages(
+          msgs.map((m) => ({
+            role: m.role as "user" | "assistant",
+            content: m.content,
+          }))
+        )
+      )
+      .catch((e) => console.error("load_conversation failed:", e));
+  }, []);
+
+  // Rotating placeholder — only on home screen.
   useEffect(() => {
     if (messages.length > 0) return;
     setPhraseVisible(true);
     const fadeOut = setTimeout(() => setPhraseVisible(false), 3300);
-    const swap = setTimeout(() => setPhraseIndex((i) => (i + 1) % PHRASES.length), 3600);
-    return () => { clearTimeout(fadeOut); clearTimeout(swap); };
+    const swap = setTimeout(
+      () => setPhraseIndex((i) => (i + 1) % PHRASES.length),
+      3600
+    );
+    return () => {
+      clearTimeout(fadeOut);
+      clearTimeout(swap);
+    };
   }, [phraseIndex, messages.length]);
 
-  // Auto-scroll to latest message
+  // Auto-scroll.
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streamingContent]);
@@ -62,15 +214,22 @@ export default function MainArea() {
     });
 
     const unlistenDone = await listen("chat-done", () => {
-      setMessages((prev) => [...prev, { role: "assistant", content: response }]);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: response },
+      ]);
       setStreamingContent("");
       setStreaming(false);
+      onConversationUpdated();
       unlistenToken();
       unlistenDone();
     });
 
     const unlistenError = await listen<string>("chat-error", (e) => {
-      setMessages((prev) => [...prev, { role: "assistant", content: `Error: ${e.payload}` }]);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: `Error: ${e.payload}` },
+      ]);
       setStreamingContent("");
       setStreaming(false);
       unlistenToken();
@@ -79,9 +238,22 @@ export default function MainArea() {
     });
 
     try {
-      await invoke("send_message_streaming", { prompt });
+      const returnedConvId = await invoke<string>("send_message_streaming", {
+        prompt,
+        conversationId: activeConvId.current,
+      });
+
+      // New conversation was just created — notify App (sidebar refresh).
+      // This does NOT remount MainArea; streaming continues uninterrupted.
+      if (!activeConvId.current) {
+        activeConvId.current = returnedConvId;
+        onConversationCreated(returnedConvId);
+      }
     } catch (e) {
-      setMessages((prev) => [...prev, { role: "assistant", content: `Error: ${e}` }]);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: `Error: ${e}` },
+      ]);
       setStreamingContent("");
       setStreaming(false);
       unlistenToken();
@@ -98,30 +270,29 @@ export default function MainArea() {
   }
 
   // --- Chat view ---
-  if (messages.length > 0) {
+  if (messages.length > 0 || streaming) {
     return (
       <main className="flex-1 flex flex-col bg-cream overflow-hidden">
         <div className="flex-1 overflow-y-auto px-6 py-6">
           <div className="max-w-[700px] mx-auto flex flex-col gap-4">
             {messages.map((msg, i) => (
-              <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div
-                  className={`max-w-[80%] px-4 py-3 rounded-xl text-[15px] whitespace-pre-wrap ${
-                    msg.role === "user"
-                      ? "bg-forest text-white"
-                      : "bg-white text-ink border border-[#DDD8CE]"
-                  }`}
-                >
-                  {msg.content}
-                </div>
+              <div
+                key={i}
+                className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+              >
+                {msg.role === "user" ? (
+                  <div className="max-w-[80%] px-4 py-3 rounded-xl text-[15px] bg-forest text-white whitespace-pre-wrap">
+                    {msg.content}
+                  </div>
+                ) : (
+                  <AssistantBubble content={msg.content} />
+                )}
               </div>
             ))}
 
             {streaming && (
               <div className="flex justify-start">
-                <div className="max-w-[80%] px-4 py-3 rounded-xl text-[15px] bg-white text-ink border border-[#DDD8CE] whitespace-pre-wrap">
-                  {streamingContent || <span className="animate-pulse text-ink-soft">●●●</span>}
-                </div>
+                <StreamingBubble raw={streamingContent} />
               </div>
             )}
 
@@ -176,7 +347,11 @@ export default function MainArea() {
           {inputValue === "" && (
             <div
               className="absolute inset-0 flex items-center pointer-events-none text-ink-soft text-[15px]"
-              style={{ paddingLeft: "16px", opacity: phraseVisible ? 1 : 0, transition: "opacity 300ms ease-out" }}
+              style={{
+                paddingLeft: "16px",
+                opacity: phraseVisible ? 1 : 0,
+                transition: "opacity 300ms ease-out",
+              }}
             >
               {PHRASES[phraseIndex]}
             </div>

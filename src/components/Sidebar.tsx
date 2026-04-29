@@ -1,16 +1,35 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 
-const RECENTS = [
-  "Organize my photos",
-  "Help with React",
-  "Plan birthday gift",
-  "Summarize meeting",
-  "Draft email to mom",
-];
+interface ConversationSummary {
+  id: string;
+  title: string;
+  updated_at: number;
+}
 
-export default function Sidebar({ onNewChat }: { onNewChat?: () => void }) {
-  const [activeIndex, setActiveIndex] = useState(0);
+interface Props {
+  onNewChat?: () => void;
+  activeConversationId: string | null;
+  onSelectConversation: (id: string) => void;
+  refreshKey: number;
+}
+
+export default function Sidebar({
+  onNewChat,
+  activeConversationId,
+  onSelectConversation,
+  refreshKey,
+}: Props) {
   const [collapsed, setCollapsed] = useState(false);
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+
+  // Reload the conversation list whenever refreshKey changes (new conversation
+  // created or existing one updated) or on first mount.
+  useEffect(() => {
+    invoke<ConversationSummary[]>("list_conversations")
+      .then(setConversations)
+      .catch((e) => console.error("list_conversations failed:", e));
+  }, [refreshKey]);
 
   return (
     <aside
@@ -21,11 +40,7 @@ export default function Sidebar({ onNewChat }: { onNewChat?: () => void }) {
         {!collapsed && (
           <span
             className="text-forest"
-            style={{
-              fontFamily: "Georgia, serif",
-              fontWeight: "bold",
-              fontSize: "16px",
-            }}
+            style={{ fontFamily: "Georgia, serif", fontWeight: "bold", fontSize: "16px" }}
           >
             GreenCube
           </span>
@@ -57,19 +72,26 @@ export default function Sidebar({ onNewChat }: { onNewChat?: () => void }) {
           </div>
 
           <nav className="flex-1 overflow-y-auto px-2">
-            {RECENTS.map((item, i) => (
-              <div
-                key={i}
-                onClick={() => setActiveIndex(i)}
-                className={`text-ink text-[13px] py-2 px-3 rounded-sm cursor-pointer transition-colors duration-150 ease-out ${
-                  activeIndex === i
-                    ? "bg-[#E2DED5]"
-                    : "hover:bg-[#E8E4DB]"
-                }`}
-              >
-                {item}
+            {conversations.length === 0 ? (
+              <div className="text-ink-soft text-[12px] px-3 py-2">
+                No conversations yet
               </div>
-            ))}
+            ) : (
+              conversations.map((conv) => (
+                <div
+                  key={conv.id}
+                  onClick={() => onSelectConversation(conv.id)}
+                  className={`text-ink text-[13px] py-2 px-3 rounded-sm cursor-pointer transition-colors duration-150 ease-out truncate ${
+                    activeConversationId === conv.id
+                      ? "bg-[#E2DED5]"
+                      : "hover:bg-[#E8E4DB]"
+                  }`}
+                  title={conv.title}
+                >
+                  {conv.title}
+                </div>
+              ))
+            )}
           </nav>
 
           <div className="text-ink hover:text-forest cursor-pointer text-[14px] px-4 pt-4 pb-[20px] transition-colors duration-150 ease-out">
