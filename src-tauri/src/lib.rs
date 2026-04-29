@@ -18,11 +18,10 @@ pub fn run() {
             }
 
             // Detect hardware and find whichever model file is actually on disk.
-            let (model_path, model_name) =
-                hardware::find_available_model().unwrap_or_else(|| {
-                    log::warn!("No model files found in C:\\models");
-                    (String::new(), String::from("No model available"))
-                });
+            let (model_path, model_name) = hardware::find_available_model().unwrap_or_else(|| {
+                log::warn!("No model files found in C:\\models");
+                (String::new(), String::from("No model available"))
+            });
 
             log::info!("Selected model: {} ({})", model_name, model_path);
 
@@ -37,6 +36,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_model_info,
+            commands::is_first_run,
             commands::send_message,
             commands::send_message_streaming,
             commands::list_models,

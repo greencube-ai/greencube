@@ -17,8 +17,7 @@ pub fn generate_with(
     prompt: &str,
     max_tokens: u32,
 ) -> Result<String> {
-    let ctx_params = LlamaContextParams::default()
-        .with_n_ctx(NonZeroU32::new(2048));
+    let ctx_params = LlamaContextParams::default().with_n_ctx(NonZeroU32::new(2048));
     let mut ctx = model
         .new_context(backend, ctx_params)
         .context("Failed to create inference context")?;
@@ -83,8 +82,7 @@ pub fn generate_streaming<F>(
 where
     F: FnMut(String),
 {
-    let ctx_params = LlamaContextParams::default()
-        .with_n_ctx(NonZeroU32::new(2048));
+    let ctx_params = LlamaContextParams::default().with_n_ctx(NonZeroU32::new(2048));
     let mut ctx = model
         .new_context(backend, ctx_params)
         .context("Failed to create inference context")?;
@@ -151,14 +149,13 @@ mod tests {
     use super::*;
 
     // Run with:
-    //   $env:GREENCUBE_MODEL_PATH="C:\models\Phi-4-mini-instruct-Q4_K_M.gguf"
+    //   $env:GREENCUBE_MODEL_PATH="C:\models\Qwen3-14B-Q4_K_M.gguf"
     //   cargo test test_basic_inference -- --ignored --nocapture
     #[test]
     #[ignore]
     fn test_basic_inference() {
-        let model_path = std::env::var("GREENCUBE_MODEL_PATH").expect(
-            "Set GREENCUBE_MODEL_PATH to the path of your .gguf file",
-        );
+        let model_path = std::env::var("GREENCUBE_MODEL_PATH")
+            .expect("Set GREENCUBE_MODEL_PATH to the path of your .gguf file");
 
         let result = generate(&model_path, "The capital of France is", 20);
 

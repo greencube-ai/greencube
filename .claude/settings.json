@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo build *)",
+      "Bash(ninja --version)",
+      "Read(//c/Program Files/Microsoft Visual Studio/2022/**)",
+      "Read(//c/Program Files \\(x86\\)/Microsoft Visual Studio/2022/**)",
+      "Read(//c/Program Files/Microsoft Visual Studio/**)",
+      "Bash(curl -L \"https://github.com/ninja-build/ninja/releases/download/v1.12.1/ninja-win.zip\" -o \"C:/t/ninja-win.zip\")",
+      "Bash(mkdir -p \"C:/ninja\")",
+      "Read(//c/t/**)",
+      "Bash(unzip -o ninja-win.zip -d \"C:/ninja\")",
+      "Bash(\"C:/ninja/ninja.exe\" --version)",
+      "Read(//c/Users/mateu/.cache/huggingface/hub/models--Qwen--Qwen3-14B-GGUF/snapshots/**)"
+    ],
+    "additionalDirectories": [
+      "C:\\t\\debug\\build\\llama-cpp-sys-2-f66907e8217994b5",
+      "C:\\Users\\mateu\\.cache\\huggingface\\hub\\models--Qwen--Qwen3-14B-GGUF\\snapshots\\530227a7d994db8eca5ab5ced2fb692b614357fd"
+    ]
+  }
+}

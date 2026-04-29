@@ -7,7 +7,7 @@ use llama_cpp_2::{
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
-use crate::models;
+use crate::{hardware, models};
 
 // --- App state (lives for the entire duration the app is running) ---
 
@@ -23,9 +23,44 @@ pub(crate) struct LoadedModel {
 unsafe impl Send for LoadedModel {}
 unsafe impl Sync for LoadedModel {}
 
+/// Wrap a user message in the ChatML format that Qwen3 (and Llama 3) expect.
+/// Without this the model doesn't know where its turn ends, so it keeps
+/// generating — inventing more "user" messages and answering them itself.
+fn apply_chat_template(user_message: &str) -> String {
+    format!(
+        "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n{user_message}<|im_end|>\n<|im_start|>assistant\n"
+    )
+}
+
+/// Load a model from disk, trying GPU acceleration first and falling back to
+/// CPU if Vulkan is unavailable or the GPU runs out of memory.
+fn load_model_with_fallback(path: &str) -> Result<LoadedModel, String> {
+    let backend =
+        LlamaBackend::init().map_err(|e| format!("Failed to initialize llama.cpp: {e}"))?;
+
+    // Try GPU: offload all layers to Vulkan (999 is "as many as possible").
+    let gpu_params = LlamaModelParams::default().with_n_gpu_layers(999);
+    match LlamaModel::load_from_file(&backend, path, &gpu_params) {
+        Ok(model) => {
+            log::info!("Model loaded with GPU acceleration (Vulkan)");
+            return Ok(LoadedModel { backend, model });
+        }
+        Err(e) => {
+            log::warn!("GPU loading failed ({e}), retrying on CPU");
+        }
+    }
+
+    // CPU fallback — works on any hardware.
+    let cpu_params = LlamaModelParams::default();
+    let model = LlamaModel::load_from_file(&backend, path, &cpu_params)
+        .map_err(|e| format!("Failed to load model: {e}"))?;
+    log::info!("Model loaded on CPU (no GPU acceleration)");
+    Ok(LoadedModel { backend, model })
+}
+
 /// Tauri managed state — shared across all command calls.
 pub struct AppState {
-    /// Display name of the model in use (e.g. "Phi-4 Mini").
+    /// Display name of the model in use (e.g. "Qwen3 14B").
     pub model_name: String,
     /// Full path to the GGUF file on disk.
     pub model_path: String,
@@ -43,7 +78,7 @@ pub struct ModelInfo {
 }
 
 /// Returns which model is currently selected and where it lives on disk.
-/// The frontend can use this to display "Running Phi-4 Mini" in the UI.
+/// The frontend can use this to display "Running Qwen3 14B" in the UI.
 #[tauri::command]
 pub fn get_model_info(state: State<AppState>) -> ModelInfo {
     ModelInfo {
@@ -62,9 +97,7 @@ pub fn get_model_info(state: State<AppState>) -> ModelInfo {
 #[tauri::command]
 pub fn send_message(prompt: String, state: State<AppState>) -> Result<String, String> {
     if state.model_path.is_empty() {
-        return Err(
-            "No model file found in C:\\models. Download a model first.".to_string(),
-        );
+        return Err("No model file found in C:\\models. Download a model first.".to_string());
     }
 
     let mut guard = state
@@ -72,21 +105,14 @@ pub fn send_message(prompt: String, state: State<AppState>) -> Result<String, St
         .lock()
         .map_err(|e| format!("Failed to acquire model lock: {e}"))?;
 
-    // Load the model on first use.
     if guard.is_none() {
         log::info!("Loading model: {}", state.model_path);
-        let backend = LlamaBackend::init()
-            .map_err(|e| format!("Failed to initialize llama.cpp: {e}"))?;
-        let model_params = LlamaModelParams::default();
-        let model = LlamaModel::load_from_file(&backend, &state.model_path, &model_params)
-            .map_err(|e| format!("Failed to load model from {}: {e}", state.model_path))?;
-        *guard = Some(LoadedModel { backend, model });
-        log::info!("Model loaded successfully");
+        *guard = Some(load_model_with_fallback(&state.model_path)?);
     }
 
     let loaded = guard.as_ref().unwrap();
 
-    crate::inference::generate_with(&loaded.backend, &loaded.model, &prompt, 80)
+    crate::inference::generate_with(&loaded.backend, &loaded.model, &apply_chat_template(&prompt), 1024)
         .map_err(|e| format!("Inference failed: {e}"))
 }
 
@@ -107,7 +133,8 @@ pub fn send_message_streaming(
     app: AppHandle,
 ) -> Result<(), String> {
     if state.model_path.is_empty() {
-        app.emit("chat-error", "No model file found in C:\\models").ok();
+        app.emit("chat-error", "No model file found in C:\\models")
+            .ok();
         return Err("No model available".to_string());
     }
 
@@ -118,30 +145,30 @@ pub fn send_message_streaming(
 
     if guard.is_none() {
         log::info!("Loading model: {}", state.model_path);
-        let backend = LlamaBackend::init()
-            .map_err(|e| format!("Failed to initialize llama.cpp: {e}"))?;
-        let model_params = LlamaModelParams::default();
-        let model = LlamaModel::load_from_file(&backend, &state.model_path, &model_params)
-            .map_err(|e| format!("Failed to load model: {e}"))?;
-        *guard = Some(LoadedModel { backend, model });
-        log::info!("Model loaded successfully");
+        *guard = Some(load_model_with_fallback(&state.model_path).map_err(|e| {
+            app.emit("chat-error", &e).ok();
+            e
+        })?);
     }
 
     let loaded = guard.as_ref().unwrap();
 
-    crate::inference::generate_streaming(
-        &loaded.backend,
-        &loaded.model,
-        &prompt,
-        80,
-        |token| {
-            app.emit("chat-token", token).ok();
-        },
-    )
+    crate::inference::generate_streaming(&loaded.backend, &loaded.model, &apply_chat_template(&prompt), 1024, |token| {
+        app.emit("chat-token", token).ok();
+    })
     .map_err(|e| format!("Inference failed: {e}"))?;
 
     app.emit("chat-done", ()).ok();
     Ok(())
+}
+
+// --- Setup / first-run ---
+
+/// Returns true if no model has been downloaded yet.
+/// The frontend shows the setup/download screen when this is true.
+#[tauri::command]
+pub fn is_first_run() -> bool {
+    models::list_model_statuses().iter().all(|m| !m.downloaded)
 }
 
 // --- Model management ---
@@ -168,7 +195,7 @@ struct DownloadError {
 /// Returns every known model and whether it is already downloaded.
 #[tauri::command]
 pub fn list_models() -> Vec<models::ModelStatus> {
-    models::list_model_statuses()
+    models::list_model_statuses_for_ram(hardware::detect().total_ram_gb)
 }
 
 /// Download a model from HuggingFace in the background.
@@ -191,13 +218,13 @@ pub fn download_model(
         .ok_or_else(|| format!("Unknown model id: {model_id}"))?;
 
     let url = models::download_url(model);
-    let dest_path = models::models_dir().join(model.filename);
+    let dest_path =
+        models::installed_path(model).unwrap_or_else(|| models::models_dir().join(model.filename));
     let size_hint = model.size_bytes;
     let mid = model_id.clone();
 
     std::thread::spawn(move || {
-        if let Err(e) = run_download(&app, &mid, &url, &dest_path, size_hint, hf_token.as_deref())
-        {
+        if let Err(e) = run_download(&app, &mid, &url, &dest_path, size_hint, hf_token.as_deref()) {
             app.emit(
                 "download-error",
                 DownloadError {
@@ -234,9 +261,7 @@ fn run_download(
         return Ok(());
     }
 
-    let client = reqwest::blocking::Client::builder()
-        .timeout(None)
-        .build()?;
+    let client = reqwest::blocking::Client::builder().timeout(None).build()?;
 
     let mut req = client.get(url);
     if let Some(token) = hf_token {
