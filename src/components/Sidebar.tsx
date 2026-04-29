@@ -8,7 +8,7 @@ const RECENTS = [
   "Draft email to mom",
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ onNewChat }: { onNewChat?: () => void }) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [collapsed, setCollapsed] = useState(false);
 
@@ -45,6 +45,7 @@ export default function Sidebar() {
           <div className="px-4">
             <button
               type="button"
+              onClick={onNewChat}
               className="bg-transparent text-ink-soft hover:text-ink border-0 p-0 text-[13px] text-left cursor-pointer transition-colors duration-150 ease-out"
             >
               + New chat
