@@ -15,6 +15,13 @@ pub struct ConversationSummary {
 }
 
 #[derive(Serialize, Clone, Debug)]
+pub struct Memory {
+    pub id: i64,
+    pub content: String,
+    pub created_at: i64,
+}
+
+#[derive(Serialize, Clone, Debug)]
 pub struct StoredMessage {
     pub id: i64,
     pub role: String,
@@ -42,6 +49,11 @@ impl Db {
                  role            TEXT    NOT NULL,
                  content         TEXT    NOT NULL,
                  created_at      INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS memories (
+                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                 content    TEXT    NOT NULL,
+                 created_at INTEGER NOT NULL
              );",
         )?;
         Ok(Db { conn })
@@ -108,6 +120,36 @@ impl Db {
     pub fn delete_conversation(&self, id: &str) -> anyhow::Result<()> {
         self.conn
             .execute("DELETE FROM conversations WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn list_memories(&self) -> anyhow::Result<Vec<Memory>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, content, created_at FROM memories ORDER BY created_at ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(Memory {
+                id: row.get(0)?,
+                content: row.get(1)?,
+                created_at: row.get(2)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn add_memory(&self, content: &str) -> anyhow::Result<Memory> {
+        let now = Self::now();
+        self.conn.execute(
+            "INSERT INTO memories (content, created_at) VALUES (?1, ?2)",
+            params![content, now],
+        )?;
+        let id = self.conn.last_insert_rowid();
+        Ok(Memory { id, content: content.to_string(), created_at: now })
+    }
+
+    pub fn delete_memory(&self, id: i64) -> anyhow::Result<()> {
+        self.conn
+            .execute("DELETE FROM memories WHERE id = ?1", params![id])?;
         Ok(())
     }
 }

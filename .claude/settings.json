@@ -11,7 +11,10 @@
       "Read(//c/t/**)",
       "Bash(unzip -o ninja-win.zip -d \"C:/ninja\")",
       "Bash(\"C:/ninja/ninja.exe\" --version)",
-      "Read(//c/Users/mateu/.cache/huggingface/hub/models--Qwen--Qwen3-14B-GGUF/snapshots/**)"
+      "Read(//c/Users/mateu/.cache/huggingface/hub/models--Qwen--Qwen3-14B-GGUF/snapshots/**)",
+      "Bash(npx tsc *)",
+      "Bash(Start-Sleep -Seconds 60)",
+      "Read(//c/Users/mateu/.cargo/registry/src/**)"
     ],
     "additionalDirectories": [
       "C:\\t\\debug\\build\\llama-cpp-sys-2-f66907e8217994b5",

@@ -17,7 +17,10 @@ pub fn generate_with(
     prompt: &str,
     max_tokens: u32,
 ) -> Result<String> {
-    let ctx_params = LlamaContextParams::default().with_n_ctx(NonZeroU32::new(2048));
+    let n_ctx: u32 = 8192;
+    let ctx_params = LlamaContextParams::default()
+        .with_n_ctx(NonZeroU32::new(n_ctx))
+        .with_n_batch(n_ctx);
     let mut ctx = model
         .new_context(backend, ctx_params)
         .context("Failed to create inference context")?;
@@ -82,7 +85,10 @@ pub fn generate_streaming<F>(
 where
     F: FnMut(String),
 {
-    let ctx_params = LlamaContextParams::default().with_n_ctx(NonZeroU32::new(2048));
+    let n_ctx: u32 = 8192;
+    let ctx_params = LlamaContextParams::default()
+        .with_n_ctx(NonZeroU32::new(n_ctx))
+        .with_n_batch(n_ctx);
     let mut ctx = model
         .new_context(backend, ctx_params)
         .context("Failed to create inference context")?;

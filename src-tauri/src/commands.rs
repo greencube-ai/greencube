@@ -23,11 +23,22 @@ pub(crate) struct LoadedModel {
 unsafe impl Send for LoadedModel {}
 unsafe impl Sync for LoadedModel {}
 
-/// Build the full ChatML prompt from conversation history + new user message.
-/// Prior turns are included so the model has full context of the conversation.
-fn apply_chat_template(history: &[db::StoredMessage], new_user_message: &str) -> String {
-    let mut prompt =
-        String::from("<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n");
+/// Build the full ChatML prompt from memories, conversation history, and the new message.
+/// Memories are injected into the system block so the model always has that context.
+fn apply_chat_template(
+    history: &[db::StoredMessage],
+    new_user_message: &str,
+    memories: &[db::Memory],
+) -> String {
+    let mut system = String::from("You are a helpful assistant.");
+    if !memories.is_empty() {
+        system.push_str("\n\nThings you know about the user:\n");
+        for mem in memories {
+            system.push_str(&format!("- {}\n", mem.content));
+        }
+    }
+
+    let mut prompt = format!("<|im_start|>system\n{system}<|im_end|>\n");
     for msg in history {
         let role = match msg.role.as_str() {
             "assistant" => "assistant",
@@ -152,12 +163,15 @@ pub fn send_message_streaming(
     let conv_id_thread = conv_id.clone();
 
     std::thread::spawn(move || {
-        // Load existing history before saving the new message so we don't
-        // include it twice when building the prompt.
-        let history = db_arc
+        // Load existing history and memories before saving the new message.
+        let (history, memories) = db_arc
             .lock()
             .ok()
-            .and_then(|db| db.load_messages(&conv_id_thread).ok())
+            .map(|db| {
+                let h = db.load_messages(&conv_id_thread).unwrap_or_default();
+                let m = db.list_memories().unwrap_or_default();
+                (h, m)
+            })
             .unwrap_or_default();
 
         // Persist the new user message.
@@ -185,7 +199,7 @@ pub fn send_message_streaming(
         }
 
         let loaded_model = guard.as_ref().unwrap();
-        let full_prompt = apply_chat_template(&history, &prompt);
+        let full_prompt = apply_chat_template(&history, &prompt, &memories);
 
         let mut full_response = String::new();
         let result = crate::inference::generate_streaming(
@@ -249,6 +263,109 @@ pub fn delete_conversation(id: String, state: State<AppState>) -> Result<(), Str
         .map_err(|e| format!("DB lock error: {e}"))?
         .delete_conversation(&id)
         .map_err(|e| e.to_string())
+}
+
+// --- Memory commands ---
+
+#[tauri::command]
+pub fn list_memories(state: State<AppState>) -> Result<Vec<db::Memory>, String> {
+    state
+        .db
+        .lock()
+        .map_err(|e| format!("DB lock error: {e}"))?
+        .list_memories()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn add_memory(content: String, state: State<AppState>) -> Result<db::Memory, String> {
+    let content = content.trim().to_string();
+    if content.is_empty() {
+        return Err("Memory content cannot be empty".to_string());
+    }
+    state
+        .db
+        .lock()
+        .map_err(|e| format!("DB lock error: {e}"))?
+        .add_memory(&content)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_memory(id: i64, state: State<AppState>) -> Result<(), String> {
+    state
+        .db
+        .lock()
+        .map_err(|e| format!("DB lock error: {e}"))?
+        .delete_memory(id)
+        .map_err(|e| e.to_string())
+}
+
+// --- File reading ---
+
+#[derive(Serialize)]
+pub struct FileMemoryContent {
+    pub filename: String,
+    pub content: String,
+    pub truncated: bool,
+}
+
+/// Extract text from a PDF supplied as raw bytes from the browser.
+/// Used as a fallback when the OS file path is not accessible from the webview.
+#[tauri::command]
+pub fn extract_pdf_bytes(bytes: Vec<u8>) -> Result<String, String> {
+    let content = pdf_extract::extract_text_from_mem(&bytes)
+        .map_err(|e| format!("PDF extraction failed: {e}"))?;
+
+    const MAX_CHARS: usize = 8_000;
+    let char_count = content.chars().count();
+    if char_count > MAX_CHARS {
+        let head: String = content.chars().take(MAX_CHARS).collect();
+        Ok(format!(
+            "{head}\n\n[… file truncated — showing {MAX_CHARS} of {char_count} characters]"
+        ))
+    } else {
+        Ok(content)
+    }
+}
+
+/// Read a file from disk and extract its text content.
+/// Supports PDF files (text extraction) and all UTF-8 text formats.
+/// Content is capped at 8 000 characters so it stays inside the model's context window.
+#[tauri::command]
+pub fn read_file_for_memory(path: String) -> Result<FileMemoryContent, String> {
+    use std::path::Path;
+
+    let path = Path::new(&path);
+    let filename = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "file".to_string());
+
+    let content = match path.extension().and_then(|e| e.to_str()).map(|s| s.to_lowercase()).as_deref() {
+        Some("pdf") => {
+            let bytes = std::fs::read(path)
+                .map_err(|e| format!("Failed to read file: {e}"))?;
+            pdf_extract::extract_text_from_mem(&bytes)
+                .map_err(|e| format!("Failed to extract PDF text: {e}"))?
+        }
+        _ => std::fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read file: {e}"))?,
+    };
+
+    const MAX_CHARS: usize = 8_000;
+    let char_count = content.chars().count();
+    let (content, truncated) = if char_count > MAX_CHARS {
+        let head: String = content.chars().take(MAX_CHARS).collect();
+        (
+            format!("{head}\n\n[… file truncated — showing {MAX_CHARS} of {char_count} characters]"),
+            true,
+        )
+    } else {
+        (content, false)
+    };
+
+    Ok(FileMemoryContent { filename, content, truncated })
 }
 
 // --- Setup / first-run ---
