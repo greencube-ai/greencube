@@ -17,11 +17,11 @@ pub struct ModelEntry {
 pub static MODELS: &[ModelEntry] = &[
     ModelEntry {
         id: "llama3-8b",
-        name: "Llama 3.3 8B Instruct (4.9 GB)",
-        display_name: "Llama 3.3 8B",
-        filename: "Meta-Llama-3.3-8B-Instruct-Q4_K_M.gguf",
+        name: "Llama 3.1 8B Instruct (4.9 GB)",
+        display_name: "Llama 3.1 8B",
+        filename: "Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
         legacy_filenames: &[],
-        repo: "lmstudio-community/Meta-Llama-3.3-8B-Instruct-GGUF",
+        repo: "bartowski/Meta-Llama-3.1-8B-Instruct-GGUF",
         size_bytes: 4_920_000_000,
         min_ram_gb: 0,
     },
@@ -33,7 +33,7 @@ pub static MODELS: &[ModelEntry] = &[
         legacy_filenames: &[],
         repo: "Qwen/Qwen3-14B-GGUF",
         size_bytes: 9_000_000_000,
-        min_ram_gb: 14,
+        min_ram_gb: 16,
     },
     ModelEntry {
         id: "mistral-small-24b",
