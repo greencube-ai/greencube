@@ -1,15 +1,6 @@
 import { useState } from "react";
 
-const RECENTS = [
-  "Organize my photos",
-  "Help with React",
-  "Plan birthday gift",
-  "Summarize meeting",
-  "Draft email to mom",
-];
-
 export default function Sidebar() {
-  const [activeIndex, setActiveIndex] = useState(0);
   const [collapsed, setCollapsed] = useState(false);
 
   return (
@@ -55,21 +46,9 @@ export default function Sidebar() {
             RECENT
           </div>
 
-          <nav className="flex-1 overflow-y-auto px-2">
-            {RECENTS.map((item, i) => (
-              <div
-                key={i}
-                onClick={() => setActiveIndex(i)}
-                className={`text-ink text-[13px] py-2 px-3 rounded-sm cursor-pointer transition-colors duration-150 ease-out ${
-                  activeIndex === i
-                    ? "bg-[#E2DED5]"
-                    : "hover:bg-[#E8E4DB]"
-                }`}
-              >
-                {item}
-              </div>
-            ))}
-          </nav>
+          <div className="flex-1 flex items-center justify-center text-ink-soft text-[13px] px-4">
+            No conversations yet
+          </div>
 
           <div className="text-ink hover:text-forest cursor-pointer text-[14px] px-4 pt-4 pb-[20px] transition-colors duration-150 ease-out">
             <span className="mr-2">⚙️</span>

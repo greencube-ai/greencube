@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 
-const SUGGESTIONS = ["Organize my photos", "Write a story", "Help me code"];
+const SUGGESTIONS = [
+  "Organize my photos by date",
+  "Build me a todo app",
+  "Rewrite my essay in my style",
+];
 
 const PHRASES = [
   "Ask GreenCube anything...",
@@ -34,9 +38,9 @@ export default function MainArea() {
 
   return (
     <main className="flex-1 flex items-center justify-center bg-cream px-6">
-      <div className="w-full max-w-[600px] flex flex-col items-center">
+      <div className="w-full max-w-[720px] flex flex-col items-center">
         <h1
-          className="text-forest mb-6"
+          className="text-forest mb-7"
           style={{
             fontFamily: "Georgia, serif",
             fontWeight: "bold",
@@ -46,18 +50,26 @@ export default function MainArea() {
           Create.
         </h1>
 
-        <div className="relative w-full mb-4">
+        <div className="relative w-full mb-5">
           <input
             type="text"
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
-            className="w-full h-12 px-4 bg-white text-ink text-[15px] border-[1.5px] border-[#DDD8CE] rounded-lg outline-none"
+            className="w-full h-12 pl-4 pr-14 bg-white text-ink text-[15px] border-[1.5px] border-[#DDD8CE] rounded-lg outline-none"
           />
+          <button
+            type="button"
+            aria-label="Send"
+            className="absolute top-[6px] right-[6px] w-[36px] h-[36px] rounded-full bg-forest hover:bg-moss text-white text-[18px] flex items-center justify-center cursor-pointer border-0 transition-colors duration-150 ease-out"
+          >
+            →
+          </button>
           {inputValue === "" && (
             <div
               className="absolute inset-0 flex items-center pointer-events-none text-ink-soft text-[15px]"
               style={{
                 paddingLeft: "16px",
+                paddingRight: "56px",
                 opacity: phraseVisible ? 1 : 0,
                 transition: "opacity 300ms ease-out",
               }}
@@ -67,12 +79,12 @@ export default function MainArea() {
           )}
         </div>
 
-        <div className="flex gap-3 mb-5 flex-wrap justify-center">
+        <div className="flex gap-3 mb-6 justify-center">
           {SUGGESTIONS.map((chip) => (
             <button
               key={chip}
               type="button"
-              className="cursor-pointer bg-transparent border border-[#DDD8CE] text-ink-soft rounded-[20px] py-2 px-4 text-[13px] transition-colors duration-150 ease-out hover:border-moss hover:text-forest"
+              className="shrink-0 whitespace-nowrap cursor-pointer bg-transparent border-[1.5px] border-[#C8C3B8] text-ink rounded-[20px] py-2 px-4 text-[14px] transition-colors duration-150 ease-out hover:bg-forest hover:text-white hover:border-forest"
             >
               {chip}
             </button>
