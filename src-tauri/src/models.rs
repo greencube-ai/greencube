@@ -33,7 +33,7 @@ pub static MODELS: &[ModelEntry] = &[
         legacy_filenames: &[],
         repo: "Qwen/Qwen3-14B-GGUF",
         size_bytes: 9_000_000_000,
-        min_ram_gb: 16,
+        min_ram_gb: 14,
     },
     ModelEntry {
         id: "mistral-small-24b",
