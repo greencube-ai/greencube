@@ -17,7 +17,7 @@ pub fn generate_with(
     prompt: &str,
     max_tokens: u32,
 ) -> Result<String> {
-    let ctx_params = LlamaContextParams::default().with_n_ctx(NonZeroU32::new(2048));
+    let ctx_params = LlamaContextParams::default().with_n_ctx(NonZeroU32::new(8192));
     let mut ctx = model
         .new_context(backend, ctx_params)
         .context("Failed to create inference context")?;
@@ -56,6 +56,16 @@ pub fn generate_with(
             .context("Failed to decode token to string")?;
         output.push_str(&piece);
 
+        if output.contains("<|eot_id|>") || output.contains("<|im_end|>") {
+            output.truncate(
+                output
+                    .find("<|eot_id|>")
+                    .or_else(|| output.find("<|im_end|>"))
+                    .unwrap_or(output.len()),
+            );
+            break;
+        }
+
         batch.clear();
         batch
             .add(next_token, n_cur, &[0], true)
@@ -82,7 +92,7 @@ pub fn generate_streaming<F>(
 where
     F: FnMut(String),
 {
-    let ctx_params = LlamaContextParams::default().with_n_ctx(NonZeroU32::new(2048));
+    let ctx_params = LlamaContextParams::default().with_n_ctx(NonZeroU32::new(8192));
     let mut ctx = model
         .new_context(backend, ctx_params)
         .context("Failed to create inference context")?;
@@ -106,6 +116,8 @@ where
     let mut sampler = LlamaSampler::greedy();
     let mut decoder = encoding_rs::UTF_8.new_decoder();
     let mut n_cur = n_prompt;
+    let mut produced = String::new();
+    const STOP_MARKERS: &[&str] = &["<|eot_id|>", "<|im_end|>"];
 
     loop {
         let next_token = sampler.sample(&ctx, -1);
@@ -118,6 +130,15 @@ where
         let piece = model
             .token_to_piece(next_token, &mut decoder, false, None)
             .context("Failed to decode token to string")?;
+
+        let prev_len = produced.len();
+        produced.push_str(&piece);
+        if let Some(idx) = STOP_MARKERS.iter().filter_map(|m| produced.find(m)).min() {
+            if idx > prev_len {
+                on_token(produced[prev_len..idx].to_string());
+            }
+            break;
+        }
 
         on_token(piece);
 

@@ -23,13 +23,19 @@ pub(crate) struct LoadedModel {
 unsafe impl Send for LoadedModel {}
 unsafe impl Sync for LoadedModel {}
 
-/// Wrap a user message in the ChatML format that Qwen3 (and Llama 3) expect.
+/// Wrap a user message in the chat template the loaded model expects.
 /// Without this the model doesn't know where its turn ends, so it keeps
 /// generating — inventing more "user" messages and answering them itself.
-fn apply_chat_template(user_message: &str) -> String {
-    format!(
-        "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n{user_message}<|im_end|>\n<|im_start|>assistant\n"
-    )
+fn apply_chat_template(model_name: &str, user_message: &str) -> String {
+    if model_name.contains("Llama") {
+        format!(
+            "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\nYou are a helpful assistant.<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n{user_message}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
+        )
+    } else {
+        format!(
+            "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n{user_message}<|im_end|>\n<|im_start|>assistant\n"
+        )
+    }
 }
 
 /// Load a model from disk, trying GPU acceleration first and falling back to
@@ -112,7 +118,7 @@ pub fn send_message(prompt: String, state: State<AppState>) -> Result<String, St
 
     let loaded = guard.as_ref().unwrap();
 
-    crate::inference::generate_with(&loaded.backend, &loaded.model, &apply_chat_template(&prompt), 1024)
+    crate::inference::generate_with(&loaded.backend, &loaded.model, &apply_chat_template(&state.model_name, &prompt), 1024)
         .map_err(|e| format!("Inference failed: {e}"))
 }
 
@@ -138,6 +144,7 @@ pub fn send_message_streaming(
     }
 
     let model_path = state.model_path.clone();
+    let model_name = state.model_name.clone();
     let loaded = state.loaded.clone();
 
     // Spawn on a background thread so the UI stays responsive while the
@@ -166,7 +173,7 @@ pub fn send_message_streaming(
         let result = crate::inference::generate_streaming(
             &loaded.backend,
             &loaded.model,
-            &apply_chat_template(&prompt),
+            &apply_chat_template(&model_name, &prompt),
             1024,
             |token| { app.emit("chat-token", token).ok(); },
         );
