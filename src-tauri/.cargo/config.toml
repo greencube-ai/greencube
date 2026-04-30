@@ -1,0 +1,25 @@
+[build]
+# Short target dir to avoid Windows MAX_PATH limit (260 chars).
+# The Vulkan shader build nests deeply enough to exceed it otherwise.
+target-dir = "C:/t"
+
+[env]
+# Required by bindgen (llama-cpp-sys-2) to find libclang.
+# Default LLVM install path on Windows — change if you installed LLVM elsewhere.
+LIBCLANG_PATH = "C:/Program Files/LLVM/bin"
+
+# Use NMake instead of MSBuild to avoid a parallel-build race condition
+# in the Vulkan shader sub-project. This is an architectural requirement,
+# not a preference — do not change CMAKE_GENERATOR.
+CMAKE_GENERATOR = "NMake Makefiles"
+
+# Full path to nmake.exe on your machine.
+# After installing Visual Studio, run this in PowerShell to find your version:
+#   ls "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/"
+# Then replace the version number below (14.xx.xxxxx) with yours.
+#
+# VS Community (full IDE, free):
+#   C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/<version>/bin/Hostx64/x64/nmake.exe
+# VS Build Tools only (no IDE):
+#   C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/<version>/bin/Hostx64/x64/nmake.exe
+CMAKE_MAKE_PROGRAM = "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/nmake.exe"
