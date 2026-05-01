@@ -28,6 +28,13 @@ pub struct StoredMessage {
     pub content: String,
 }
 
+#[derive(Clone, Debug)]
+pub struct ConversationContextSummary {
+    pub summary: String,
+    pub summarized_through_message_id: i64,
+    pub updated_at: i64,
+}
+
 impl Db {
     pub fn open(path: &Path) -> anyhow::Result<Self> {
         if let Some(parent) = path.parent() {
@@ -54,6 +61,12 @@ impl Db {
                  id         INTEGER PRIMARY KEY AUTOINCREMENT,
                  content    TEXT    NOT NULL,
                  created_at INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS conversation_summaries (
+                 conversation_id               TEXT    PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+                 summary                       TEXT    NOT NULL,
+                 summarized_through_message_id INTEGER NOT NULL,
+                 updated_at                    INTEGER NOT NULL
              );",
         )?;
         Ok(Db { conn })
@@ -122,9 +135,101 @@ impl Db {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    pub fn load_recent_messages(
+        &self,
+        conversation_id: &str,
+        limit: usize,
+    ) -> anyhow::Result<Vec<StoredMessage>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, role, content
+             FROM (
+                 SELECT id, role, content
+                 FROM messages
+                 WHERE conversation_id = ?1
+                 ORDER BY id DESC
+                 LIMIT ?2
+             )
+             ORDER BY id ASC",
+        )?;
+        let rows = stmt.query_map(params![conversation_id, limit as i64], |row| {
+            Ok(StoredMessage {
+                id: row.get(0)?,
+                role: row.get(1)?,
+                content: row.get(2)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn load_messages_after_id(
+        &self,
+        conversation_id: &str,
+        after_id: i64,
+    ) -> anyhow::Result<Vec<StoredMessage>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, role, content
+             FROM messages
+             WHERE conversation_id = ?1 AND id > ?2
+             ORDER BY id ASC",
+        )?;
+        let rows = stmt.query_map(params![conversation_id, after_id], |row| {
+            Ok(StoredMessage {
+                id: row.get(0)?,
+                role: row.get(1)?,
+                content: row.get(2)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     pub fn delete_conversation(&self, id: &str) -> anyhow::Result<()> {
         self.conn
             .execute("DELETE FROM conversations WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn get_conversation_summary(
+        &self,
+        conversation_id: &str,
+    ) -> anyhow::Result<Option<ConversationContextSummary>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT summary, summarized_through_message_id, updated_at
+             FROM conversation_summaries
+             WHERE conversation_id = ?1",
+        )?;
+        let mut rows = stmt.query(params![conversation_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(ConversationContextSummary {
+                summary: row.get(0)?,
+                summarized_through_message_id: row.get(1)?,
+                updated_at: row.get(2)?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn upsert_conversation_summary(
+        &self,
+        conversation_id: &str,
+        summary: &str,
+        summarized_through_message_id: i64,
+    ) -> anyhow::Result<()> {
+        let now = Self::now();
+        self.conn.execute(
+            "INSERT INTO conversation_summaries (
+                 conversation_id,
+                 summary,
+                 summarized_through_message_id,
+                 updated_at
+             )
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(conversation_id) DO UPDATE SET
+                 summary = excluded.summary,
+                 summarized_through_message_id = excluded.summarized_through_message_id,
+                 updated_at = excluded.updated_at",
+            params![conversation_id, summary, summarized_through_message_id, now],
+        )?;
         Ok(())
     }
 

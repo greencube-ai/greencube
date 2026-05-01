@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, TryLockError};
+use std::time::Duration;
 
 use llama_cpp_2::{
     llama_backend::LlamaBackend,
@@ -30,8 +31,17 @@ pub(crate) struct LoadedState {
     inner: LoadedModel,
 }
 
+const MAX_MEMORY_CHARS: usize = 800;
+const SUMMARY_MAX_CHARS: usize = 2_400;
+const SUMMARY_MESSAGE_MAX_CHARS: usize = 1_200;
+const RECENT_HISTORY_MESSAGES: usize = 10;
+const SUMMARY_REFRESH_STEP: usize = 4;
+const SUMMARY_START_DELAY_MS: u64 = 750;
+const SUMMARY_MAX_TOKENS: u32 = 320;
+
 /// Build the full ChatML prompt from memories, conversation history, and the new message.
 /// Memories are injected into the system block so the model always has that context.
+#[allow(dead_code)]
 fn build_system_block(memories: &[db::Memory]) -> String {
     const MAX_MEM_CHARS: usize = 800;
     let mut system = String::from(
@@ -52,6 +62,7 @@ fn build_system_block(memories: &[db::Memory]) -> String {
     system
 }
 
+#[allow(dead_code)]
 fn apply_chat_template(
     history: &[db::StoredMessage],
     new_user_message: &str,
@@ -95,6 +106,316 @@ fn apply_chat_template(
         ));
         prompt
     }
+}
+
+fn truncate_chars(text: &str, max_chars: usize) -> String {
+    let trimmed = text.trim();
+    let mut chars = trimmed.chars();
+    let head: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        format!("{head}... [truncated]")
+    } else {
+        head
+    }
+}
+
+fn build_chat_system_block(
+    memories: &[db::Memory],
+    summary: Option<&db::ConversationContextSummary>,
+) -> String {
+    let mut system = String::from(
+        "You are a helpful assistant. \
+         When thinking before a response, be concise - keep your reasoning under 200 words.",
+    );
+
+    if let Some(summary) = summary {
+        let context = truncate_chars(&summary.summary, SUMMARY_MAX_CHARS);
+        if !context.is_empty() {
+            system.push_str(
+                "\n\nConversation summary of older context. Treat it as background context; \
+                 newer raw messages follow separately:\n",
+            );
+            system.push_str(&context);
+        }
+    }
+
+    if !memories.is_empty() {
+        system.push_str("\n\nThings you know about the user:\n");
+        for mem in memories {
+            let content = truncate_chars(&mem.content, MAX_MEMORY_CHARS);
+            system.push_str(&format!("- {content}\n"));
+        }
+    }
+
+    system
+}
+
+fn apply_model_template(
+    system: &str,
+    history: &[db::StoredMessage],
+    new_user_message: &str,
+    model_path: &str,
+) -> String {
+    let lower = model_path.to_lowercase();
+
+    if lower.contains("gemma") {
+        let mut prompt = format!("<start_of_turn>system\n{system}<end_of_turn>\n");
+        for msg in history {
+            let role = if msg.role == "assistant" {
+                "model"
+            } else {
+                "user"
+            };
+            prompt.push_str(&format!(
+                "<start_of_turn>{role}\n{}<end_of_turn>\n",
+                msg.content
+            ));
+        }
+        prompt.push_str(&format!(
+            "<start_of_turn>user\n{new_user_message}<end_of_turn>\n<start_of_turn>model\n"
+        ));
+        prompt
+    } else {
+        let mut prompt = format!("<|im_start|>system\n{system}<|im_end|>\n");
+        for msg in history {
+            let role = if msg.role == "assistant" {
+                "assistant"
+            } else {
+                "user"
+            };
+            prompt.push_str(&format!("<|im_start|>{role}\n{}<|im_end|>\n", msg.content));
+        }
+        prompt.push_str(&format!(
+            "<|im_start|>user\n{new_user_message}<|im_end|>\n<|im_start|>assistant\n"
+        ));
+        prompt
+    }
+}
+
+fn apply_chat_template_with_summary(
+    summary: Option<&db::ConversationContextSummary>,
+    history: &[db::StoredMessage],
+    new_user_message: &str,
+    memories: &[db::Memory],
+    model_path: &str,
+) -> String {
+    let system = build_chat_system_block(memories, summary);
+    apply_model_template(&system, history, new_user_message, model_path)
+}
+
+fn format_messages_for_summary(messages: &[db::StoredMessage]) -> String {
+    let mut out = String::new();
+    for msg in messages {
+        let role = if msg.role == "assistant" {
+            "Assistant"
+        } else {
+            "User"
+        };
+        let content = truncate_chars(&msg.content, SUMMARY_MESSAGE_MAX_CHARS);
+        out.push_str(role);
+        out.push_str(":\n");
+        out.push_str(&content);
+        out.push_str("\n\n");
+    }
+    out.trim().to_string()
+}
+
+fn sanitize_summary_output(text: &str) -> String {
+    const MARKERS: &[&str] = &[
+        "<|im_end|>",
+        "<|im_start|>",
+        "<end_of_turn>",
+        "<|end_of_turn|>",
+        "<|eot_id|>",
+        "<|end|>",
+        "<|endoftext|>",
+        "<thought>",
+        "</thought>",
+        "<channel|>",
+        "</channel|>",
+        "<channel>",
+        "</channel>",
+    ];
+
+    let mut cleaned = text.to_string();
+    for marker in MARKERS {
+        cleaned = cleaned.replace(marker, " ");
+    }
+
+    let mut normalized = Vec::new();
+    let mut previous_blank = false;
+    for raw_line in cleaned.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() {
+            if !previous_blank {
+                normalized.push(String::new());
+            }
+            previous_blank = true;
+            continue;
+        }
+        if line.starts_with("```") {
+            continue;
+        }
+        normalized.push(line.to_string());
+        previous_blank = false;
+    }
+
+    truncate_chars(&normalized.join("\n"), SUMMARY_MAX_CHARS)
+}
+
+fn build_summary_prompt(
+    existing_summary: Option<&db::ConversationContextSummary>,
+    new_messages: &[db::StoredMessage],
+    model_path: &str,
+) -> String {
+    let system = "You maintain a compact running summary of a conversation so another model can \
+                  pick up the context quickly. Keep only durable context: goals, constraints, \
+                  preferences, decisions, facts, promised follow-up, and open tasks. Do not \
+                  include chain-of-thought. Output plain text only.";
+
+    let existing = existing_summary
+        .map(|summary| truncate_chars(&summary.summary, SUMMARY_MAX_CHARS))
+        .filter(|summary| !summary.is_empty())
+        .unwrap_or_else(|| "None yet.".to_string());
+    let transcript = format_messages_for_summary(new_messages);
+    let user_message = format!(
+        "Update the running conversation summary.\n\n\
+         Existing summary:\n\
+         {existing}\n\n\
+         New conversation messages to fold in:\n\
+         {transcript}\n\n\
+         Return only the updated summary using these exact sections:\n\
+         Goals:\n\
+         - ...\n\
+         Constraints and preferences:\n\
+         - ...\n\
+         Open tasks:\n\
+         - ...\n\
+         Key context:\n\
+         - ...\n\
+         Replace the placeholder dots with real content. Use '- none' when a section is empty."
+    );
+
+    apply_model_template(system, &[], &user_message, model_path)
+}
+
+fn spawn_summary_refresh(
+    loaded: Arc<Mutex<Option<LoadedState>>>,
+    db_arc: Arc<Mutex<db::Db>>,
+    conversation_id: String,
+) {
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(SUMMARY_START_DELAY_MS));
+
+        let (existing_summary, messages_to_summarize, summarized_through_message_id) = {
+            let db = match db_arc.lock() {
+                Ok(db) => db,
+                Err(e) => {
+                    log::warn!("Skipping summary refresh because DB lock failed: {e}");
+                    return;
+                }
+            };
+
+            let existing_summary = match db.get_conversation_summary(&conversation_id) {
+                Ok(summary) => summary,
+                Err(e) => {
+                    log::warn!("Failed to load conversation summary: {e}");
+                    return;
+                }
+            };
+
+            let after_id = existing_summary
+                .as_ref()
+                .map_or(0, |summary| summary.summarized_through_message_id);
+            let unsummarized = match db.load_messages_after_id(&conversation_id, after_id) {
+                Ok(messages) => messages,
+                Err(e) => {
+                    log::warn!("Failed to load unsummarized messages: {e}");
+                    return;
+                }
+            };
+
+            if unsummarized.len() <= RECENT_HISTORY_MESSAGES {
+                return;
+            }
+
+            let summarizable_len = unsummarized.len().saturating_sub(RECENT_HISTORY_MESSAGES);
+            if summarizable_len == 0 {
+                return;
+            }
+
+            if existing_summary.is_some() && summarizable_len < SUMMARY_REFRESH_STEP {
+                return;
+            }
+
+            let messages_to_summarize = unsummarized[..summarizable_len].to_vec();
+            let summarized_through_message_id = match messages_to_summarize.last() {
+                Some(message) => message.id,
+                None => return,
+            };
+
+            (
+                existing_summary,
+                messages_to_summarize,
+                summarized_through_message_id,
+            )
+        };
+
+        let guard = match loaded.try_lock() {
+            Ok(guard) => guard,
+            Err(TryLockError::WouldBlock) => return,
+            Err(TryLockError::Poisoned(_)) => {
+                log::warn!("Skipping summary refresh because the model lock is poisoned");
+                return;
+            }
+        };
+
+        let Some(loaded_state) = guard.as_ref() else {
+            return;
+        };
+
+        let prompt = build_summary_prompt(
+            existing_summary.as_ref(),
+            &messages_to_summarize,
+            &loaded_state.path,
+        );
+        let generated = match crate::inference::generate_with(
+            &loaded_state.inner.backend,
+            &loaded_state.inner.model,
+            &prompt,
+            SUMMARY_MAX_TOKENS,
+        ) {
+            Ok(summary) => summary,
+            Err(e) => {
+                log::warn!("Failed to refresh conversation summary: {e}");
+                return;
+            }
+        };
+
+        drop(guard);
+
+        let summary = sanitize_summary_output(&generated);
+        if summary.is_empty() {
+            log::warn!("Skipping summary refresh because the model returned an empty summary");
+            return;
+        }
+
+        let db = match db_arc.lock() {
+            Ok(db) => db,
+            Err(e) => {
+                log::warn!("Failed to save conversation summary because DB lock failed: {e}");
+                return;
+            }
+        };
+
+        if let Err(e) = db.upsert_conversation_summary(
+            &conversation_id,
+            &summary,
+            summarized_through_message_id,
+        ) {
+            log::warn!("Failed to store conversation summary: {e}");
+        }
+    });
 }
 
 fn earliest_stop_pos(buffer: &str, stop_strings: &[&str]) -> Option<usize> {
@@ -370,15 +691,24 @@ pub fn send_message_streaming(
         let thread_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             stop_flag.store(false, Ordering::Relaxed); // reset from any previous stop
                                                        // Load existing history and memories before saving the new message.
-            let (history, memories) = db_arc
-                .lock()
-                .ok()
-                .map(|db| {
-                    let h = db.load_messages(&conv_id_thread).unwrap_or_default();
-                    let m = db.list_memories().unwrap_or_default();
-                    (h, m)
-                })
-                .unwrap_or_default();
+            let (history, memories, conversation_summary) = match db_arc.lock() {
+                Ok(db) => {
+                    let conversation_summary =
+                        db.get_conversation_summary(&conv_id_thread).ok().flatten();
+                    let history = if let Some(summary) = conversation_summary.as_ref() {
+                        db.load_messages_after_id(
+                            &conv_id_thread,
+                            summary.summarized_through_message_id,
+                        )
+                        .unwrap_or_else(|_| db.load_messages(&conv_id_thread).unwrap_or_default())
+                    } else {
+                        db.load_messages(&conv_id_thread).unwrap_or_default()
+                    };
+                    let memories = db.list_memories().unwrap_or_default();
+                    (history, memories, conversation_summary)
+                }
+                Err(_) => (Vec::new(), Vec::new(), None),
+            };
 
             // Persist the new user message.
             if let Ok(db) = db_arc.lock() {
@@ -423,7 +753,13 @@ pub fn send_message_streaming(
             }
 
             let ls = guard.as_ref().unwrap();
-            let full_prompt = apply_chat_template(&history, &prompt, &memories, &ls.path);
+            let full_prompt = apply_chat_template_with_summary(
+                conversation_summary.as_ref(),
+                &history,
+                &prompt,
+                &memories,
+                &ls.path,
+            );
 
             // Tokens that signal end-of-turn across ChatML, Gemma, and Llama formats.
             const STOP_STRINGS: &[&str] = &[
@@ -492,6 +828,7 @@ pub fn send_message_streaming(
                             .ok();
                     }
                     app.emit("chat-done", ()).ok();
+                    spawn_summary_refresh(loaded.clone(), db_arc.clone(), conv_id_thread.clone());
                 }
                 Err(e) => {
                     app.emit("chat-error", e.to_string()).ok();

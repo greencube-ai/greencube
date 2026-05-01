@@ -39,6 +39,7 @@ export default function Sidebar({
 
   // Chats
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [deletingConversationId, setDeletingConversationId] = useState<string | null>(null);
 
   // Memory
   const [memories, setMemories] = useState<Memory[]>([]);
@@ -76,6 +77,33 @@ export default function Sidebar({
   function showSavedFeedback() {
     setSavedToast(true);
     setTimeout(() => setSavedToast(false), 2000);
+  }
+
+  async function deleteConversation(
+    e: React.MouseEvent<HTMLButtonElement>,
+    conversationId: string,
+    title: string
+  ) {
+    e.stopPropagation();
+
+    const confirmed = window.confirm(`Delete "${title}"?`);
+    if (!confirmed) return;
+
+    setDeletingConversationId(conversationId);
+    try {
+      await invoke("delete_conversation", { id: conversationId });
+      setConversations((prev) => prev.filter((conv) => conv.id !== conversationId));
+
+      if (activeConversationId === conversationId) {
+        onNewChat?.();
+      }
+    } catch (err) {
+      console.error("delete_conversation failed:", err);
+    } finally {
+      setDeletingConversationId((current) =>
+        current === conversationId ? null : current
+      );
+    }
   }
 
   // ── File reading ──────────────────────────────────────────────────────────
@@ -312,14 +340,23 @@ export default function Sidebar({
                     <div
                       key={conv.id}
                       onClick={() => onSelectConversation(conv.id)}
-                      className={`text-ink text-[13px] py-2 px-3 rounded-sm cursor-pointer transition-colors duration-150 ease-out truncate ${
+                      className={`group flex items-center gap-2 text-ink text-[13px] py-2 px-3 rounded-sm cursor-pointer transition-colors duration-150 ease-out ${
                         activeConversationId === conv.id
                           ? "bg-[#E2DED5]"
                           : "hover:bg-[#E8E4DB]"
                       }`}
                       title={conv.title}
                     >
-                      {conv.title}
+                      <span className="flex-1 truncate">{conv.title}</span>
+                      <button
+                        type="button"
+                        onClick={(e) => deleteConversation(e, conv.id, conv.title)}
+                        aria-label={`Delete conversation ${conv.title}`}
+                        disabled={deletingConversationId === conv.id}
+                        className="text-ink-soft hover:text-red-400 cursor-pointer bg-transparent border-0 text-[16px] leading-none opacity-0 group-hover:opacity-100 transition-opacity shrink-0 disabled:opacity-40"
+                      >
+                        {deletingConversationId === conv.id ? "..." : "×"}
+                      </button>
                     </div>
                   ))
                 )}
