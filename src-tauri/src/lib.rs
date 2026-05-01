@@ -48,6 +48,7 @@ pub fn run() {
                 loaded: std::sync::Arc::new(std::sync::Mutex::new(None)),
                 db: std::sync::Arc::new(std::sync::Mutex::new(db)),
                 dev_model_override: std::sync::Arc::new(std::sync::Mutex::new(None)),
+                stop_requested: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             });
 
             Ok(())
@@ -68,6 +69,7 @@ pub fn run() {
             commands::extract_pdf_bytes,
             commands::set_dev_model,
             commands::get_dev_model,
+            commands::stop_generation,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

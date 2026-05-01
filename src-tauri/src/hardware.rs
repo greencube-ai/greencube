@@ -140,10 +140,10 @@ mod tests {
 
     #[test]
     fn test_select_model_for_ram_uses_expected_tiers() {
-        assert_eq!(select_model_for_ram(8).id, "llama3-8b");
-        assert_eq!(select_model_for_ram(13).id, "llama3-8b");
-        assert_eq!(select_model_for_ram(14).id, "llama3-8b");
-        assert_eq!(select_model_for_ram(15).id, "llama3-8b");
+        assert_eq!(select_model_for_ram(8).id, "phi4-mini");
+        assert_eq!(select_model_for_ram(13).id, "phi4-mini");
+        assert_eq!(select_model_for_ram(14).id, "phi4-mini");
+        assert_eq!(select_model_for_ram(15).id, "phi4-mini");
         assert_eq!(select_model_for_ram(16).id, "qwen3-14b");
         assert_eq!(select_model_for_ram(32).id, "gemma4-26b-moe");
         assert_eq!(select_model_for_ram(39).id, "gemma4-26b-moe");

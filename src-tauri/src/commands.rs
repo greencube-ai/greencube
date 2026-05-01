@@ -1,4 +1,5 @@
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use llama_cpp_2::{
     llama_backend::LlamaBackend,
@@ -111,6 +112,8 @@ pub struct AppState {
     pub db: Arc<Mutex<db::Db>>,
     /// Developer override: when set, always use this model regardless of auto-selection.
     pub dev_model_override: Arc<Mutex<Option<String>>>, // model id
+    /// Set to true to abort the current generation after the next token.
+    pub stop_requested: Arc<AtomicBool>,
 }
 
 // --- Commands ---
@@ -149,6 +152,12 @@ pub fn set_dev_model(model_id: Option<String>, state: State<AppState>) -> Result
 #[tauri::command]
 pub fn get_dev_model(state: State<AppState>) -> Option<String> {
     state.dev_model_override.lock().ok()?.clone()
+}
+
+/// Asks the current generation to stop after its next token.
+#[tauri::command]
+pub fn stop_generation(state: State<AppState>) {
+    state.stop_requested.store(true, Ordering::Relaxed);
 }
 
 /// Returns true if the prompt warrants using the heavier reasoning model.
@@ -261,8 +270,10 @@ pub fn send_message_streaming(
     let loaded = state.loaded.clone();
     let db_arc = state.db.clone();
     let conv_id_thread = conv_id.clone();
+    let stop_flag = state.stop_requested.clone();
 
     std::thread::spawn(move || {
+        stop_flag.store(false, Ordering::Relaxed); // reset from any previous stop
         // Load existing history and memories before saving the new message.
         let (history, memories) = db_arc
             .lock()
@@ -319,6 +330,7 @@ pub fn send_message_streaming(
             |token| {
                 full_response.push_str(&token);
                 app.emit("chat-token", token).ok();
+                !stop_flag.load(Ordering::Relaxed) // return false to stop
             },
         );
 

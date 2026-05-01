@@ -18,13 +18,13 @@ pub struct ModelEntry {
 /// Ordered from lightest to heaviest so RAM-based selection stays data-driven.
 pub static MODELS: &[ModelEntry] = &[
     ModelEntry {
-        id: "llama3-8b",
-        name: "Llama 3.3 8B Instruct (4.9 GB)",
-        display_name: "Llama 3.3 8B",
-        filename: "Meta-Llama-3.3-8B-Instruct-Q4_K_M.gguf",
+        id: "phi4-mini",
+        name: "Phi-4 Mini Instruct (2.4 GB)",
+        display_name: "Phi-4 Mini",
+        filename: "Phi-4-mini-instruct-Q4_K_M.gguf",
         legacy_filenames: &[],
-        repo: "lmstudio-community/Meta-Llama-3.3-8B-Instruct-GGUF",
-        size_bytes: 4_920_000_000,
+        repo: "bartowski/Phi-4-mini-instruct-GGUF",
+        size_bytes: 2_500_000_000,
         min_ram_gb: 0,
         reasoning_pair_id: None,
     },

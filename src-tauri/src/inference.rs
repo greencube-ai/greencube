@@ -83,7 +83,7 @@ pub fn generate_streaming<F>(
     mut on_token: F,
 ) -> Result<()>
 where
-    F: FnMut(String),
+    F: FnMut(String) -> bool, // return false to stop early
 {
     let n_ctx: u32 = 8192;
     let ctx_params = LlamaContextParams::default()
@@ -125,7 +125,9 @@ where
             .token_to_piece(next_token, &mut decoder, false, None)
             .context("Failed to decode token to string")?;
 
-        on_token(piece);
+        if !on_token(piece) {
+            break;
+        }
 
         batch.clear();
         batch

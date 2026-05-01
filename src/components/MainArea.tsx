@@ -62,28 +62,31 @@ function parseThink(raw: string): Parsed {
     };
   }
 
-  // --- Gemma 4 format: <|channel|>thought\n<channel|>...<|channel|>response\n<channel|>... ---
-  const THOUGHT = "<|channel|>thought";
-  const RESPONSE = "<|channel|>response";
-  const CONTENT = "<channel|>";
+  // --- Gemma 4 format: <|channel|>thought|thinking\n<channel|>...<|channel|>response\n<channel|>... ---
+  // Matches both "thought" and "thinking" as the channel name.
+  const CHANNEL_RE = /<\|channel\|>(thought|thinking)\n?/i;
+  const RESPONSE_MARKER = "<|channel|>response";
+  const CONTENT_PREFIX = "<channel|>";
 
-  const tIdx = raw.indexOf(THOUGHT);
-  if (tIdx !== -1) {
-    const rIdx = raw.indexOf(RESPONSE, tIdx);
+  const channelMatch = CHANNEL_RE.exec(raw);
+  if (channelMatch) {
+    const tEnd = channelMatch.index + channelMatch[0].length;
+    const rIdx = raw.indexOf(RESPONSE_MARKER, tEnd);
 
-    // Helper: strip the leading <channel|> prefix and trim surrounding newlines.
+    // Strip leading <channel|> prefix and surrounding whitespace.
     const strip = (s: string) => {
       const t = s.replace(/^\n+/, "");
-      return t.startsWith(CONTENT) ? t.slice(CONTENT.length) : t;
+      return (t.startsWith(CONTENT_PREFIX) ? t.slice(CONTENT_PREFIX.length) : t).trim();
     };
 
     if (rIdx === -1) {
-      // Still inside the thinking block.
-      return { thinking: strip(raw.slice(tIdx + THOUGHT.length)), response: "" };
+      return { thinking: strip(raw.slice(tEnd)), response: "" };
     }
 
-    const thinking = strip(raw.slice(tIdx + THOUGHT.length, rIdx)).trimEnd();
-    const response = strip(raw.slice(rIdx + RESPONSE.length)).trimStart();
+    const thinking = strip(raw.slice(tEnd, rIdx));
+    // Strip <channel|> prefix and any stray channel markers from the response.
+    const rawResponse = raw.slice(rIdx + RESPONSE_MARKER.length);
+    const response = strip(rawResponse).replace(/<\|?channel\|?>/g, "");
     return { thinking, response };
   }
 
@@ -408,14 +411,24 @@ export default function MainArea({
                 placeholder="Message GreenCube..."
                 className="flex-1 h-12 px-4 bg-white text-ink text-[15px] border-[1.5px] border-[#DDD8CE] rounded-lg outline-none disabled:opacity-50"
               />
-              <button
-                type="button"
-                onClick={() => sendMessage(inputValue)}
-                disabled={streaming || !inputValue.trim()}
-                className="h-12 px-5 bg-forest text-white rounded-lg text-[14px] disabled:opacity-40 hover:opacity-90 transition-opacity cursor-pointer border-0"
-              >
-                Send
-              </button>
+              {streaming ? (
+                <button
+                  type="button"
+                  onClick={() => invoke("stop_generation")}
+                  className="h-12 px-5 bg-red-500 text-white rounded-lg text-[14px] hover:opacity-90 transition-opacity cursor-pointer border-0"
+                >
+                  Stop
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => sendMessage(inputValue)}
+                  disabled={!inputValue.trim()}
+                  className="h-12 px-5 bg-forest text-white rounded-lg text-[14px] disabled:opacity-40 hover:opacity-90 transition-opacity cursor-pointer border-0"
+                >
+                  Send
+                </button>
+              )}
             </div>
             <ModelModeBar mode={modelMode} onChange={setModelMode} hasReasoning={hasReasoning} activeModel={activeModel} />
           </div>
