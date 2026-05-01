@@ -21,8 +21,7 @@ pub fn run() {
             // Open the conversation history database in the app's data directory.
             let data_dir = app.path().app_data_dir()?;
             let db_path = data_dir.join("conversations.db");
-            let db = db::Db::open(&db_path)
-                .map_err(|e| format!("Failed to open database: {e}"))?;
+            let db = db::Db::open(&db_path).map_err(|e| format!("Failed to open database: {e}"))?;
             log::info!("Database opened at {}", db_path.display());
 
             // Detect hardware and find the best model(s) available on disk.
@@ -37,7 +36,11 @@ pub fn run() {
 
             log::info!("Fast model: {} ({})", model_name, model_path);
             if !reasoning_model_path.is_empty() {
-                log::info!("Reasoning model: {} ({})", reasoning_model_name, reasoning_model_path);
+                log::info!(
+                    "Reasoning model: {} ({})",
+                    reasoning_model_name,
+                    reasoning_model_path
+                );
             }
 
             app.manage(commands::AppState {

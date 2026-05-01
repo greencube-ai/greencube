@@ -45,7 +45,9 @@
       "PowerShell(python -c \"import hf_xet; import inspect; print\\(inspect.getfile\\(hf_xet\\)\\)\")",
       "PowerShell(Get-ChildItem \"C:\\\\Users\\\\mateu\" -Force -ErrorAction SilentlyContinue | Where-Object { $_.PSIsContainer -and $_.LastWriteTime -gt \\(Get-Date\\).AddHours\\(-2\\) } | Select-Object Name, LastWriteTime)",
       "Bash(python3 -)",
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "Bash(where glslc *)",
+      "Bash(where cmake *)"
     ],
     "additionalDirectories": [
       "C:\\t\\debug\\build\\llama-cpp-sys-2-f66907e8217994b5",

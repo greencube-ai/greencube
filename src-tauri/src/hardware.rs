@@ -84,9 +84,15 @@ pub fn find_model_pair() -> (Option<(String, String)>, Option<(String, String)>)
 
         // If the MoE is on disk, use it as the fast model.
         if let (Some(m), Some(path)) = (moe, moe_path) {
-            let fast = Some((path.to_string_lossy().to_string(), m.display_name.to_string()));
+            let fast = Some((
+                path.to_string_lossy().to_string(),
+                m.display_name.to_string(),
+            ));
             let reasoning = if let (Some(d), Some(dpath)) = (dense, dense_path) {
-                Some((dpath.to_string_lossy().to_string(), d.display_name.to_string()))
+                Some((
+                    dpath.to_string_lossy().to_string(),
+                    d.display_name.to_string(),
+                ))
             } else {
                 None
             };
@@ -95,7 +101,13 @@ pub fn find_model_pair() -> (Option<(String, String)>, Option<(String, String)>)
 
         // MoE not on disk yet — fall back to just the 31B with no reasoning upgrade.
         if let (Some(d), Some(dpath)) = (dense, dense_path) {
-            return (Some((dpath.to_string_lossy().to_string(), d.display_name.to_string())), None);
+            return (
+                Some((
+                    dpath.to_string_lossy().to_string(),
+                    d.display_name.to_string(),
+                )),
+                None,
+            );
         }
     }
 
@@ -105,7 +117,8 @@ pub fn find_model_pair() -> (Option<(String, String)>, Option<(String, String)>)
         .find(|m| models::installed_path(m).is_some());
 
     let fast = fast_entry.and_then(|m| {
-        models::installed_path(m).map(|p| (p.to_string_lossy().to_string(), m.display_name.to_string()))
+        models::installed_path(m)
+            .map(|p| (p.to_string_lossy().to_string(), m.display_name.to_string()))
     });
 
     let reasoning = fast_entry

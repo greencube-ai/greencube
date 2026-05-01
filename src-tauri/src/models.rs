@@ -171,12 +171,18 @@ mod tests {
     #[test]
     fn test_list_model_statuses_for_ram_marks_recommended() {
         let statuses_16 = list_model_statuses_for_ram(16);
-        assert!(statuses_16.iter().any(|s| s.id == "qwen3-14b" && s.recommended));
+        assert!(statuses_16
+            .iter()
+            .any(|s| s.id == "qwen3-14b" && s.recommended));
 
         let statuses_32 = list_model_statuses_for_ram(32);
-        assert!(statuses_32.iter().any(|s| s.id == "gemma4-26b-moe" && s.recommended));
+        assert!(statuses_32
+            .iter()
+            .any(|s| s.id == "gemma4-26b-moe" && s.recommended));
 
         let statuses_40 = list_model_statuses_for_ram(40);
-        assert!(statuses_40.iter().any(|s| s.id == "gemma4-31b" && s.recommended));
+        assert!(statuses_40
+            .iter()
+            .any(|s| s.id == "gemma4-31b" && s.recommended));
     }
 }

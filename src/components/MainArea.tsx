@@ -48,6 +48,15 @@ interface Parsed {
   response: string;
 }
 
+function stripLeakedChannelMarkers(text: string): string {
+  return text
+    .replace(/<\|channel\|>(thought|thinking|response)\s*/gi, "")
+    .replace(/<\/?(thought|thinking)>/gi, "")
+    .replace(/<channel\|>\s*/gi, "")
+    .replace(/<\|?channel\|?>\s*/gi, "")
+    .trim();
+}
+
 function parseThink(raw: string): Parsed {
   // --- Qwen3 format: <think>...</think> ---
   const qStart = raw.indexOf("<think>");
@@ -88,6 +97,12 @@ function parseThink(raw: string): Parsed {
     const rawResponse = raw.slice(rIdx + RESPONSE_MARKER.length);
     const response = strip(rawResponse).replace(/<\|?channel\|?>/g, "");
     return { thinking, response };
+  }
+
+  // --- Leaked marker fallback: display the content cleanly instead of raw tags ---
+  const cleaned = stripLeakedChannelMarkers(raw);
+  if (cleaned !== raw.trim()) {
+    return { thinking: "", response: cleaned };
   }
 
   return { thinking: "", response: raw };
@@ -246,6 +261,8 @@ export default function MainArea({
   // UUID mid-session without causing a remount.
   const activeConvId = useRef<string | null>(conversationId);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const currentRequestId = useRef(0);
+  const stopCurrentRequestRef = useRef<null | (() => void)>(null);
 
   // Fetch the initial model name and keep it updated as models swap.
   useEffect(() => {
@@ -299,41 +316,82 @@ export default function MainArea({
     if (!text.trim() || streaming) return;
 
     const prompt = text.trim();
+    const requestId = currentRequestId.current + 1;
+    currentRequestId.current = requestId;
     setInputValue("");
     setMessages((prev) => [...prev, { role: "user", content: prompt }]);
     setStreaming(true);
     setStreamingContent("");
 
     let response = "";
+    let finished = false;
+    const cleanupFns: Array<() => void> = [];
+
+    const cleanup = () => {
+      while (cleanupFns.length > 0) {
+        const fn = cleanupFns.pop();
+        try {
+          fn?.();
+        } catch {
+          // Ignore listener cleanup failures during teardown.
+        }
+      }
+    };
+
+    const finish = ({
+      assistantContent,
+      markUpdated,
+    }: {
+      assistantContent?: string;
+      markUpdated?: boolean;
+    } = {}) => {
+      if (finished) return;
+      finished = true;
+
+      if (assistantContent) {
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: assistantContent },
+        ]);
+      }
+
+      setStreamingContent("");
+      setStreaming(false);
+      stopCurrentRequestRef.current = null;
+      cleanup();
+
+      if (markUpdated) {
+        onConversationUpdated();
+      }
+    };
 
     const unlistenToken = await listen<string>("chat-token", (e) => {
+      if (finished || currentRequestId.current !== requestId) return;
       response += e.payload;
       setStreamingContent(response);
     });
+    cleanupFns.push(unlistenToken);
 
     const unlistenDone = await listen("chat-done", () => {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: response },
-      ]);
-      setStreamingContent("");
-      setStreaming(false);
-      onConversationUpdated();
-      unlistenToken();
-      unlistenDone();
+      if (currentRequestId.current !== requestId) return;
+      finish({ assistantContent: response, markUpdated: true });
     });
+    cleanupFns.push(unlistenDone);
 
     const unlistenError = await listen<string>("chat-error", (e) => {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: `Error: ${e.payload}` },
-      ]);
-      setStreamingContent("");
-      setStreaming(false);
-      unlistenToken();
-      unlistenDone();
-      unlistenError();
+      if (currentRequestId.current !== requestId) return;
+      finish({ assistantContent: `Error: ${e.payload}` });
     });
+    cleanupFns.push(unlistenError);
+
+    stopCurrentRequestRef.current = () => {
+      if (currentRequestId.current !== requestId) return;
+      void invoke("stop_generation").catch(() => {});
+      finish({
+        assistantContent: response || undefined,
+        markUpdated: !!response,
+      });
+    };
 
     try {
       const returnedConvId = await invoke<string>("send_message_streaming", {
@@ -349,15 +407,8 @@ export default function MainArea({
         onConversationCreated(returnedConvId);
       }
     } catch (e) {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: `Error: ${e}` },
-      ]);
-      setStreamingContent("");
-      setStreaming(false);
-      unlistenToken();
-      unlistenDone();
-      unlistenError();
+      if (currentRequestId.current !== requestId) return;
+      finish({ assistantContent: `Error: ${e}` });
     }
   }
 
@@ -414,7 +465,7 @@ export default function MainArea({
               {streaming ? (
                 <button
                   type="button"
-                  onClick={() => invoke("stop_generation")}
+                  onClick={() => stopCurrentRequestRef.current?.()}
                   className="h-12 px-5 bg-red-500 text-white rounded-lg text-[14px] hover:opacity-90 transition-opacity cursor-pointer border-0"
                 >
                   Stop

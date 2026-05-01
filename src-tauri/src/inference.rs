@@ -55,7 +55,7 @@ pub fn generate_with(
         }
 
         let piece = model
-            .token_to_piece(next_token, &mut decoder, false, None)
+            .token_to_piece(next_token, &mut decoder, true, None)
             .context("Failed to decode token to string")?;
         output.push_str(&piece);
 
@@ -122,7 +122,7 @@ where
         }
 
         let piece = model
-            .token_to_piece(next_token, &mut decoder, false, None)
+            .token_to_piece(next_token, &mut decoder, true, None)
             .context("Failed to decode token to string")?;
 
         if !on_token(piece) {

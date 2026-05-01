@@ -76,7 +76,12 @@ impl Db {
         Ok(id)
     }
 
-    pub fn add_message(&self, conversation_id: &str, role: &str, content: &str) -> anyhow::Result<()> {
+    pub fn add_message(
+        &self,
+        conversation_id: &str,
+        role: &str,
+        content: &str,
+    ) -> anyhow::Result<()> {
         let now = Self::now();
         self.conn.execute(
             "INSERT INTO messages (conversation_id, role, content, created_at) VALUES (?1, ?2, ?3, ?4)",
@@ -90,9 +95,9 @@ impl Db {
     }
 
     pub fn list_conversations(&self) -> anyhow::Result<Vec<ConversationSummary>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, title, updated_at FROM conversations ORDER BY updated_at DESC",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, title, updated_at FROM conversations ORDER BY updated_at DESC")?;
         let rows = stmt.query_map([], |row| {
             Ok(ConversationSummary {
                 id: row.get(0)?,
@@ -124,9 +129,9 @@ impl Db {
     }
 
     pub fn list_memories(&self) -> anyhow::Result<Vec<Memory>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, content, created_at FROM memories ORDER BY created_at ASC",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, content, created_at FROM memories ORDER BY created_at ASC")?;
         let rows = stmt.query_map([], |row| {
             Ok(Memory {
                 id: row.get(0)?,
@@ -144,7 +149,11 @@ impl Db {
             params![content, now],
         )?;
         let id = self.conn.last_insert_rowid();
-        Ok(Memory { id, content: content.to_string(), created_at: now })
+        Ok(Memory {
+            id,
+            content: content.to_string(),
+            created_at: now,
+        })
     }
 
     pub fn delete_memory(&self, id: i64) -> anyhow::Result<()> {

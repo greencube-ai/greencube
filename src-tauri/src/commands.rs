@@ -1,5 +1,5 @@
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use llama_cpp_2::{
     llama_backend::LlamaBackend,
@@ -32,15 +32,12 @@ pub(crate) struct LoadedState {
 
 /// Build the full ChatML prompt from memories, conversation history, and the new message.
 /// Memories are injected into the system block so the model always has that context.
-fn apply_chat_template(
-    history: &[db::StoredMessage],
-    new_user_message: &str,
-    memories: &[db::Memory],
-) -> String {
-    // Cap each memory at 800 chars so a large file memory can't blow up the context window.
+fn build_system_block(memories: &[db::Memory]) -> String {
     const MAX_MEM_CHARS: usize = 800;
-
-    let mut system = String::from("You are a helpful assistant.");
+    let mut system = String::from(
+        "You are a helpful assistant. \
+         When thinking before a response, be concise — keep your reasoning under 200 words.",
+    );
     if !memories.is_empty() {
         system.push_str("\n\nThings you know about the user:\n");
         for mem in memories {
@@ -52,22 +49,87 @@ fn apply_chat_template(
             }
         }
     }
+    system
+}
 
-    let mut prompt = format!("<|im_start|>system\n{system}<|im_end|>\n");
-    for msg in history {
-        let role = match msg.role.as_str() {
-            "assistant" => "assistant",
-            _ => "user",
-        };
+fn apply_chat_template(
+    history: &[db::StoredMessage],
+    new_user_message: &str,
+    memories: &[db::Memory],
+    model_path: &str,
+) -> String {
+    let system = build_system_block(memories);
+    let lower = model_path.to_lowercase();
+
+    if lower.contains("gemma") {
+        // Gemma 4 native format — triggers thinking mode correctly.
+        let mut prompt = format!("<start_of_turn>system\n{system}<end_of_turn>\n");
+        for msg in history {
+            let role = if msg.role == "assistant" {
+                "model"
+            } else {
+                "user"
+            };
+            prompt.push_str(&format!(
+                "<start_of_turn>{role}\n{}<end_of_turn>\n",
+                msg.content
+            ));
+        }
         prompt.push_str(&format!(
-            "<|im_start|>{role}\n{}<|im_end|>\n",
-            msg.content
+            "<start_of_turn>user\n{new_user_message}<end_of_turn>\n<start_of_turn>model\n"
         ));
+        prompt
+    } else {
+        // ChatML — used by Qwen3, Phi-4, Llama, and most others.
+        let mut prompt = format!("<|im_start|>system\n{system}<|im_end|>\n");
+        for msg in history {
+            let role = if msg.role == "assistant" {
+                "assistant"
+            } else {
+                "user"
+            };
+            prompt.push_str(&format!("<|im_start|>{role}\n{}<|im_end|>\n", msg.content));
+        }
+        prompt.push_str(&format!(
+            "<|im_start|>user\n{new_user_message}<|im_end|>\n<|im_start|>assistant\n"
+        ));
+        prompt
     }
-    prompt.push_str(&format!(
-        "<|im_start|>user\n{new_user_message}<|im_end|>\n<|im_start|>assistant\n"
-    ));
-    prompt
+}
+
+fn earliest_stop_pos(buffer: &str, stop_strings: &[&str]) -> Option<usize> {
+    stop_strings
+        .iter()
+        .filter_map(|stop| buffer.find(stop))
+        .min()
+}
+
+fn partial_stop_suffix_start(buffer: &str, stop_strings: &[&str]) -> Option<usize> {
+    let max_stop_len = stop_strings.iter().map(|s| s.len()).max().unwrap_or(0);
+    let mut boundaries: Vec<usize> = buffer.char_indices().map(|(idx, _)| idx).collect();
+    boundaries.push(buffer.len());
+
+    for start in boundaries.into_iter().rev().skip(1) {
+        let suffix = &buffer[start..];
+        if suffix.len() > max_stop_len {
+            break;
+        }
+        if stop_strings.iter().any(|stop| stop.starts_with(suffix)) {
+            return Some(start);
+        }
+    }
+
+    None
+}
+
+fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(msg) = payload.downcast_ref::<&str>() {
+        (*msg).to_string()
+    } else if let Some(msg) = payload.downcast_ref::<String>() {
+        msg.clone()
+    } else {
+        "unknown panic".to_string()
+    }
 }
 
 /// Load a model from disk, trying GPU acceleration first and falling back to
@@ -168,16 +230,38 @@ fn needs_reasoning(prompt: &str) -> bool {
     }
     let lower = prompt.to_lowercase();
     const SIGNALS: &[&str] = &[
-        "explain", "why", "how does", "how do",
-        "analyze", "analyse", "compare", "contrast",
-        "write", "create", "implement", "code", "program",
-        "design", "build", "develop",
-        "summarize", "summarise", "summary",
-        "review", "evaluate", "critique",
-        "step by step", "step-by-step",
-        "difference between", "pros and cons",
-        "debug", "fix this", "what's wrong",
-        "help me understand", "research", "essay",
+        "explain",
+        "why",
+        "how does",
+        "how do",
+        "analyze",
+        "analyse",
+        "compare",
+        "contrast",
+        "write",
+        "create",
+        "implement",
+        "code",
+        "program",
+        "design",
+        "build",
+        "develop",
+        "summarize",
+        "summarise",
+        "summary",
+        "review",
+        "evaluate",
+        "critique",
+        "step by step",
+        "step-by-step",
+        "difference between",
+        "pros and cons",
+        "debug",
+        "fix this",
+        "what's wrong",
+        "help me understand",
+        "research",
+        "essay",
     ];
     SIGNALS.iter().any(|kw| lower.contains(kw))
 }
@@ -204,16 +288,14 @@ pub fn send_message_streaming(
     app: AppHandle,
 ) -> Result<String, String> {
     if state.model_path.is_empty() {
-        app.emit("chat-error", "No model file found in C:\\models").ok();
+        app.emit("chat-error", "No model file found in C:\\models")
+            .ok();
         return Err("No model available".to_string());
     }
 
     // Resolve or create the conversation synchronously (very fast).
     let conv_id = {
-        let db = state
-            .db
-            .lock()
-            .map_err(|e| format!("DB lock error: {e}"))?;
+        let db = state.db.lock().map_err(|e| format!("DB lock error: {e}"))?;
         match conversation_id {
             Some(id) => id,
             None => {
@@ -232,7 +314,9 @@ pub fn send_message_streaming(
     // Decide which model to use before spawning the thread.
     // Priority: 1) dev pin  2) per-message override  3) auto classifier.
     let (target_path, target_name) = {
-        let dev_id = state.dev_model_override.lock()
+        let dev_id = state
+            .dev_model_override
+            .lock()
             .map_err(|e| format!("Lock error: {e}"))?
             .clone();
 
@@ -244,10 +328,17 @@ pub fn send_message_streaming(
                 (Some(e), Some(p)) => (p.to_string_lossy().to_string(), e.display_name.to_string()),
                 (Some(e), None) => {
                     // Pinned model is not downloaded — fall through to auto with a warning.
-                    log::warn!("Dev pin '{}' is set but model not found on disk; using auto", e.id);
-                    let use_reasoning = !state.reasoning_model_path.is_empty() && needs_reasoning(&prompt);
+                    log::warn!(
+                        "Dev pin '{}' is set but model not found on disk; using auto",
+                        e.id
+                    );
+                    let use_reasoning =
+                        !state.reasoning_model_path.is_empty() && needs_reasoning(&prompt);
                     if use_reasoning {
-                        (state.reasoning_model_path.clone(), state.reasoning_model_name.clone())
+                        (
+                            state.reasoning_model_path.clone(),
+                            state.reasoning_model_name.clone(),
+                        )
                     } else {
                         (state.model_path.clone(), state.model_name.clone())
                     }
@@ -260,7 +351,10 @@ pub fn send_message_streaming(
                 None => !state.reasoning_model_path.is_empty() && needs_reasoning(&prompt),
             };
             if use_reasoning {
-                (state.reasoning_model_path.clone(), state.reasoning_model_name.clone())
+                (
+                    state.reasoning_model_path.clone(),
+                    state.reasoning_model_name.clone(),
+                )
             } else {
                 (state.model_path.clone(), state.model_name.clone())
             }
@@ -273,78 +367,146 @@ pub fn send_message_streaming(
     let stop_flag = state.stop_requested.clone();
 
     std::thread::spawn(move || {
-        stop_flag.store(false, Ordering::Relaxed); // reset from any previous stop
-        // Load existing history and memories before saving the new message.
-        let (history, memories) = db_arc
-            .lock()
-            .ok()
-            .map(|db| {
-                let h = db.load_messages(&conv_id_thread).unwrap_or_default();
-                let m = db.list_memories().unwrap_or_default();
-                (h, m)
-            })
-            .unwrap_or_default();
+        let thread_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            stop_flag.store(false, Ordering::Relaxed); // reset from any previous stop
+                                                       // Load existing history and memories before saving the new message.
+            let (history, memories) = db_arc
+                .lock()
+                .ok()
+                .map(|db| {
+                    let h = db.load_messages(&conv_id_thread).unwrap_or_default();
+                    let m = db.list_memories().unwrap_or_default();
+                    (h, m)
+                })
+                .unwrap_or_default();
 
-        // Persist the new user message.
-        if let Ok(db) = db_arc.lock() {
-            db.add_message(&conv_id_thread, "user", &prompt).ok();
-        }
-
-        let mut guard = match loaded.lock() {
-            Ok(g) => g,
-            Err(e) => {
-                app.emit("chat-error", format!("Lock error: {e}")).ok();
-                return;
+            // Persist the new user message.
+            if let Ok(db) = db_arc.lock() {
+                db.add_message(&conv_id_thread, "user", &prompt).ok();
             }
-        };
 
-        // Swap models only when the target file differs from what's loaded.
-        let needs_reload = guard.as_ref().map_or(true, |ls| ls.path != target_path);
-        if needs_reload {
-            if guard.is_some() {
-                log::info!("Swapping model -> {}", target_name);
-                *guard = None; // drop the current model before loading the next
-            }
-            log::info!("Loading model: {target_path}");
-            app.emit("chat-model", &target_name).ok();
-            match load_model_with_fallback(&target_path) {
-                Ok(m) => *guard = Some(LoadedState { path: target_path, inner: m }),
+            // Recover from a poisoned lock (previous inference panicked while holding it).
+            // We reset the model state to None so the next call gets a clean reload.
+            let mut guard = match loaded.lock() {
+                Ok(g) => g,
                 Err(e) => {
-                    app.emit("chat-error", &e).ok();
-                    return;
+                    log::warn!("Loaded-model lock was poisoned by a previous panic — resetting model state");
+                    let mut g = e.into_inner();
+                    *g = None;
+                    g
+                }
+            };
+
+            // Swap models only when the target file differs from what's loaded.
+            let needs_reload = guard.as_ref().map_or(true, |ls| ls.path != target_path);
+            if needs_reload {
+                if guard.is_some() {
+                    log::info!("Swapping model -> {}", target_name);
+                    *guard = None; // drop the current model before loading the next
+                }
+                log::info!("Loading model: {target_path}");
+                app.emit("chat-model", &target_name).ok();
+                match load_model_with_fallback(&target_path) {
+                    Ok(m) => {
+                        *guard = Some(LoadedState {
+                            path: target_path,
+                            inner: m,
+                        })
+                    }
+                    Err(e) => {
+                        app.emit("chat-error", &e).ok();
+                        return;
+                    }
+                }
+            } else {
+                app.emit("chat-model", &target_name).ok();
+            }
+
+            let ls = guard.as_ref().unwrap();
+            let full_prompt = apply_chat_template(&history, &prompt, &memories, &ls.path);
+
+            // Tokens that signal end-of-turn across ChatML, Gemma, and Llama formats.
+            const STOP_STRINGS: &[&str] = &[
+                "<|im_end|>",
+                "<|im_start|>", // ChatML (Qwen3, Phi-4)
+                "<end_of_turn>",
+                "<|end_of_turn|>", // Gemma 4
+                "<|eot_id|>",
+                "<|end|>",
+                "<|endoftext|>", // Llama / Phi-4
+            ];
+
+            let mut full_response = String::new();
+            // Characters received but not yet emitted — held back in case they turn
+            // out to be the beginning of a stop string.
+            let mut hold = String::new();
+
+            let result = crate::inference::generate_streaming(
+                &ls.inner.backend,
+                &ls.inner.model,
+                &full_prompt,
+                4096,
+                |token| {
+                    hold.push_str(&token);
+
+                    // If hold already contains a complete stop string — stop immediately
+                    // and emit only the content that came before it.
+                    if let Some(pos) = earliest_stop_pos(&hold, STOP_STRINGS) {
+                        if pos > 0 {
+                            let safe = hold[..pos].to_string();
+                            full_response.push_str(&safe);
+                            app.emit("chat-token", safe).ok();
+                        }
+                        hold.clear();
+                        return false;
+                    }
+
+                    // Find the longest trailing substring that could still become a
+                    // stop string. This must stay buffered, but only on valid UTF-8
+                    // character boundaries so token filtering never panics.
+                    let keep_start =
+                        partial_stop_suffix_start(&hold, STOP_STRINGS).unwrap_or(hold.len());
+
+                    // Emit the safe portion (everything except the held-back tail).
+                    if keep_start > 0 {
+                        let safe = hold[..keep_start].to_string();
+                        full_response.push_str(&safe);
+                        app.emit("chat-token", safe).ok();
+                        hold = hold[keep_start..].to_string();
+                    }
+
+                    !stop_flag.load(Ordering::Relaxed)
+                },
+            );
+
+            // Flush whatever is left in the hold buffer (no stop string completed).
+            if !hold.is_empty() {
+                full_response.push_str(&hold);
+                app.emit("chat-token", hold).ok();
+            }
+
+            match result {
+                Ok(()) => {
+                    if let Ok(db) = db_arc.lock() {
+                        db.add_message(&conv_id_thread, "assistant", &full_response)
+                            .ok();
+                    }
+                    app.emit("chat-done", ()).ok();
+                }
+                Err(e) => {
+                    app.emit("chat-error", e.to_string()).ok();
                 }
             }
-        } else {
-            app.emit("chat-model", &target_name).ok();
-        }
+        }));
 
-        let ls = guard.as_ref().unwrap();
-        let full_prompt = apply_chat_template(&history, &prompt, &memories);
-
-        let mut full_response = String::new();
-        let result = crate::inference::generate_streaming(
-            &ls.inner.backend,
-            &ls.inner.model,
-            &full_prompt,
-            4096,
-            |token| {
-                full_response.push_str(&token);
-                app.emit("chat-token", token).ok();
-                !stop_flag.load(Ordering::Relaxed) // return false to stop
-            },
-        );
-
-        match result {
-            Ok(()) => {
-                if let Ok(db) = db_arc.lock() {
-                    db.add_message(&conv_id_thread, "assistant", &full_response)
-                        .ok();
-                }
-                app.emit("chat-done", ()).ok();
-            }
-            Err(e) => {
-                app.emit("chat-error", e.to_string()).ok();
-            }
+        if let Err(payload) = thread_result {
+            let message = panic_message(payload);
+            log::error!("Generation thread panicked: {message}");
+            app.emit(
+                "chat-error",
+                format!("Generation crashed unexpectedly: {message}"),
+            )
+            .ok();
         }
     });
 
@@ -366,7 +528,10 @@ pub fn list_conversations(state: State<AppState>) -> Result<Vec<db::Conversation
 
 /// Returns all messages for a conversation in chronological order.
 #[tauri::command]
-pub fn load_conversation(id: String, state: State<AppState>) -> Result<Vec<db::StoredMessage>, String> {
+pub fn load_conversation(
+    id: String,
+    state: State<AppState>,
+) -> Result<Vec<db::StoredMessage>, String> {
     state
         .db
         .lock()
@@ -463,15 +628,18 @@ pub fn read_file_for_memory(path: String) -> Result<FileMemoryContent, String> {
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "file".to_string());
 
-    let content = match path.extension().and_then(|e| e.to_str()).map(|s| s.to_lowercase()).as_deref() {
+    let content = match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_lowercase())
+        .as_deref()
+    {
         Some("pdf") => {
-            let bytes = std::fs::read(path)
-                .map_err(|e| format!("Failed to read file: {e}"))?;
+            let bytes = std::fs::read(path).map_err(|e| format!("Failed to read file: {e}"))?;
             pdf_extract::extract_text_from_mem(&bytes)
                 .map_err(|e| format!("Failed to extract PDF text: {e}"))?
         }
-        _ => std::fs::read_to_string(path)
-            .map_err(|e| format!("Failed to read file: {e}"))?,
+        _ => std::fs::read_to_string(path).map_err(|e| format!("Failed to read file: {e}"))?,
     };
 
     const MAX_CHARS: usize = 8_000;
@@ -479,14 +647,20 @@ pub fn read_file_for_memory(path: String) -> Result<FileMemoryContent, String> {
     let (content, truncated) = if char_count > MAX_CHARS {
         let head: String = content.chars().take(MAX_CHARS).collect();
         (
-            format!("{head}\n\n[… file truncated — showing {MAX_CHARS} of {char_count} characters]"),
+            format!(
+                "{head}\n\n[… file truncated — showing {MAX_CHARS} of {char_count} characters]"
+            ),
             true,
         )
     } else {
         (content, false)
     };
 
-    Ok(FileMemoryContent { filename, content, truncated })
+    Ok(FileMemoryContent {
+        filename,
+        content,
+        truncated,
+    })
 }
 
 // --- Setup / first-run ---
@@ -548,8 +722,7 @@ pub fn download_model(
     let mid = model_id.clone();
 
     std::thread::spawn(move || {
-        if let Err(e) = run_download(&app, &mid, &url, &dest_path, size_hint, hf_token.as_deref())
-        {
+        if let Err(e) = run_download(&app, &mid, &url, &dest_path, size_hint, hf_token.as_deref()) {
             app.emit(
                 "download-error",
                 DownloadError {
