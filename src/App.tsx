@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 import Sidebar from "./components/Sidebar";
 import MainArea from "./components/MainArea";
 import SplashScreen from "./components/SplashScreen";
+import SetupScreen from "./components/SetupScreen";
 
 export default function App() {
   const [splashVisible, setSplashVisible] = useState(true);
   const [splashFading, setSplashFading] = useState(false);
+  const [showSetup, setShowSetup] = useState(false);
 
   // Tracks which conversation is highlighted in the sidebar.
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -53,6 +55,7 @@ export default function App() {
         activeConversationId={activeConversationId}
         onSelectConversation={handleSelectConversation}
         refreshKey={sidebarRefreshKey}
+        onOpenSetup={() => setShowSetup(true)}
       />
       <MainArea
         key={navigationKey}
@@ -60,6 +63,7 @@ export default function App() {
         onConversationCreated={handleConversationCreated}
         onConversationUpdated={handleConversationUpdated}
       />
+      {showSetup && <SetupScreen onClose={() => setShowSetup(false)} />}
       {splashVisible && <SplashScreen fadingOut={splashFading} />}
     </div>
   );

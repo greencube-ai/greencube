@@ -14,11 +14,43 @@
       "Read(//c/Users/mateu/.cache/huggingface/hub/models--Qwen--Qwen3-14B-GGUF/snapshots/**)",
       "Bash(npx tsc *)",
       "Bash(Start-Sleep -Seconds 60)",
-      "Read(//c/Users/mateu/.cargo/registry/src/**)"
+      "Read(//c/Users/mateu/.cargo/registry/src/**)",
+      "Bash(cargo test *)",
+      "WebSearch",
+      "Bash(curl -sI \"https://huggingface.co/unsloth/gemma-4-31B-it-GGUF/resolve/main/gemma-4-31B-it-Q4_K_M.gguf\")",
+      "Bash(curl -sIL \"https://huggingface.co/unsloth/gemma-4-31B-it-GGUF/resolve/main/gemma-4-31B-it-Q4_K_M.gguf\")",
+      "Bash(curl -L --progress-bar -o \"C:/models/gemma-4-31B-it-Q4_K_M.gguf\" \"https://huggingface.co/unsloth/gemma-4-31B-it-GGUF/resolve/main/gemma-4-31B-it-Q4_K_M.gguf\")",
+      "Bash(echo \"Download started in background \\(PID: $!\\)\")",
+      "Bash(pip install *)",
+      "Bash(python -c ' *)",
+      "PowerShell(\\(Get-Item 'C:/models/gemma-4-31B-it-Q4_K_M.gguf'\\).Length / 1GB)",
+      "PowerShell(Get-Process | Where-Object { $_.Name -in @\\('curl','python','python3'\\) } | Select-Object Id, Name, CPU, WorkingSet)",
+      "Bash(curl -L --progress-bar -o \"C:/models/gemma-4-26B-A4B-it-Q4_K_M.gguf\" \"https://huggingface.co/bartowski/google_gemma-4-26B-A4B-it-GGUF/resolve/main/gemma-4-26B-A4B-it-Q4_K_M.gguf\")",
+      "Read(//c/Users/mateu/.cache/huggingface/hub/**)",
+      "Bash(python -c \"from huggingface_hub import hf_hub_download; print\\('ok'\\)\")",
+      "PowerShell(Get-Process | Where-Object { $_.Name -match \"greencube|tauri|python|curl\" } | Select-Object Id, Name, CPU)",
+      "PowerShell(& \"C:\\\\Windows\\\\System32\\\\handle.exe\" \"C:\\\\models\\\\gemma-4-31B-it-Q4_K_M.gguf\" 2>&1)",
+      "PowerShell(Get-Process -Id 7932 | Select-Object Id, Name, StartTime, CommandLine 2>&1; \\(Get-WmiObject Win32_Process -Filter \"ProcessId=7932\"\\).CommandLine)",
+      "PowerShell(\\(Get-CimInstance Win32_Process -Filter \"ProcessId=7932\"\\).CommandLine)",
+      "PowerShell(Get-ChildItem \"C:\\\\models\" | Select-Object Name, @{N=\"Size_GB\";E={[math]::Round\\($_.Length/1GB,2\\)}} | Format-Table -AutoSize)",
+      "PowerShell(Get-ChildItem \"C:\\\\models\\\\.cache\" -Recurse | Where-Object { !$_.PSIsContainer } | Select-Object Name, @{N=\"Size_GB\";E={[math]::Round\\($_.Length/1GB,2\\)}}, FullName | Format-Table -AutoSize)",
+      "PowerShell(Get-ChildItem \"C:\\\\models\\\\.cache\" -Recurse | Where-Object { !$_.PSIsContainer } | Select-Object FullName, @{N=\"Size_MB\";E={[math]::Round\\($_.Length/1MB,1\\)}})",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\mateu\\\\.cache\\\\huggingface\\\\hub\" -Recurse -Force | Where-Object { $_.Length -gt 100MB } | Select-Object Name, @{N=\"Size_GB\";E={[math]::Round\\($_.Length/1GB,2\\)}}, FullName | Format-Table -AutoSize)",
+      "PowerShell(Stop-Process -Id 30256 -Force)",
+      "PowerShell(python -c \"import hf_xet; print\\('hf_xet version:', hf_xet.__version__\\)\" 2>&1)",
+      "PowerShell(python -c \"import hf_xet; print\\('hf_xet ok'\\)\" 2>&1)",
+      "PowerShell(Start-Sleep -Seconds 5; Get-ChildItem \"C:\\\\models\\\\.cache\" -Recurse -Force | Select-Object Name, Length, LastWriteTime | Format-Table -AutoSize; Write-Output \"---\"; Get-ChildItem \"C:\\\\models\" -Force | Where-Object { $_.Length -gt 0 } | Select-Object Name, @{N=\"Size_GB\";E={[math]::Round\\($_.Length/1GB,2\\)}}, LastWriteTime | Format-Table -AutoSize)",
+      "PowerShell(Get-ChildItem \"$env:TEMP\" | Where-Object { $_.LastWriteTime -gt \\(Get-Date\\).AddMinutes\\(-60\\) -and $_.Length -gt 100MB } | Select-Object Name, @{N=\"Size_GB\";E={[math]::Round\\($_.Length/1GB,2\\)}}, LastWriteTime | Format-Table -AutoSize)",
+      "PowerShell(Get-ChildItem \"$env:USERPROFILE\\\\.cache\\\\huggingface\" -Force -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Length -gt 50MB } | Select-Object FullName, @{N=\"Size_GB\";E={[math]::Round\\($_.Length/1GB,2\\)}} | Sort-Object Size_GB -Descending | Select-Object -First 10)",
+      "PowerShell(python -c \"import hf_xet; import inspect; print\\(inspect.getfile\\(hf_xet\\)\\)\")",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\mateu\" -Force -ErrorAction SilentlyContinue | Where-Object { $_.PSIsContainer -and $_.LastWriteTime -gt \\(Get-Date\\).AddHours\\(-2\\) } | Select-Object Name, LastWriteTime)",
+      "Bash(python3 -)",
+      "Bash(python3 -c ' *)"
     ],
     "additionalDirectories": [
       "C:\\t\\debug\\build\\llama-cpp-sys-2-f66907e8217994b5",
-      "C:\\Users\\mateu\\.cache\\huggingface\\hub\\models--Qwen--Qwen3-14B-GGUF\\snapshots\\530227a7d994db8eca5ab5ced2fb692b614357fd"
+      "C:\\Users\\mateu\\.cache\\huggingface\\hub\\models--Qwen--Qwen3-14B-GGUF\\snapshots\\530227a7d994db8eca5ab5ced2fb692b614357fd",
+      "C:\\models"
     ]
   }
 }

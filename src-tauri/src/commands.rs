@@ -12,7 +12,7 @@ use crate::{db, hardware, models};
 // --- App state (lives for the entire duration the app is running) ---
 
 /// Holds the loaded model in memory so we don't reload it on every message.
-pub(crate) struct LoadedModel {
+struct LoadedModel {
     backend: LlamaBackend,
     model: LlamaModel,
 }
@@ -23,6 +23,12 @@ pub(crate) struct LoadedModel {
 unsafe impl Send for LoadedModel {}
 unsafe impl Sync for LoadedModel {}
 
+pub(crate) struct LoadedState {
+    /// Full path to the GGUF file currently in memory.
+    path: String,
+    inner: LoadedModel,
+}
+
 /// Build the full ChatML prompt from memories, conversation history, and the new message.
 /// Memories are injected into the system block so the model always has that context.
 fn apply_chat_template(
@@ -30,11 +36,19 @@ fn apply_chat_template(
     new_user_message: &str,
     memories: &[db::Memory],
 ) -> String {
+    // Cap each memory at 800 chars so a large file memory can't blow up the context window.
+    const MAX_MEM_CHARS: usize = 800;
+
     let mut system = String::from("You are a helpful assistant.");
     if !memories.is_empty() {
         system.push_str("\n\nThings you know about the user:\n");
         for mem in memories {
-            system.push_str(&format!("- {}\n", mem.content));
+            if mem.content.len() <= MAX_MEM_CHARS {
+                system.push_str(&format!("- {}\n", mem.content));
+            } else {
+                let head = mem.content.chars().take(MAX_MEM_CHARS).collect::<String>();
+                system.push_str(&format!("- {}… [truncated]\n", head));
+            }
         }
     }
 
@@ -83,14 +97,20 @@ fn load_model_with_fallback(path: &str) -> Result<LoadedModel, String> {
 
 /// Tauri managed state — shared across all command calls.
 pub struct AppState {
-    /// Display name of the model in use (e.g. "Qwen3 14B").
+    /// Display name of the fast model (e.g. "Gemma 4 26B MoE").
     pub model_name: String,
-    /// Full path to the GGUF file on disk.
+    /// Full path to the fast GGUF file on disk.
     pub model_path: String,
-    /// The loaded model, initialized on first message to keep startup fast.
-    pub loaded: Arc<Mutex<Option<LoadedModel>>>,
+    /// Display name of the reasoning model, empty if unavailable.
+    pub reasoning_model_name: String,
+    /// Full path to the reasoning GGUF file, empty if unavailable.
+    pub reasoning_model_path: String,
+    /// Whichever model is currently loaded; swapped on demand.
+    pub loaded: Arc<Mutex<Option<LoadedState>>>,
     /// SQLite conversation history database.
     pub db: Arc<Mutex<db::Db>>,
+    /// Developer override: when set, always use this model regardless of auto-selection.
+    pub dev_model_override: Arc<Mutex<Option<String>>>, // model id
 }
 
 // --- Commands ---
@@ -100,15 +120,57 @@ pub struct AppState {
 pub struct ModelInfo {
     pub model_name: String,
     pub model_path: String,
+    pub reasoning_model_name: String,
+    pub reasoning_model_path: String,
 }
 
-/// Returns which model is currently selected and where it lives on disk.
+/// Returns which models are available and where they live on disk.
 #[tauri::command]
 pub fn get_model_info(state: State<AppState>) -> ModelInfo {
     ModelInfo {
         model_name: state.model_name.clone(),
         model_path: state.model_path.clone(),
+        reasoning_model_name: state.reasoning_model_name.clone(),
+        reasoning_model_path: state.reasoning_model_path.clone(),
     }
+}
+
+/// Pin a specific model for all responses, bypassing auto-selection. Pass None to clear.
+#[tauri::command]
+pub fn set_dev_model(model_id: Option<String>, state: State<AppState>) -> Result<(), String> {
+    *state
+        .dev_model_override
+        .lock()
+        .map_err(|e| format!("Lock error: {e}"))? = model_id;
+    Ok(())
+}
+
+/// Returns the currently pinned dev model id, or None if auto-selection is active.
+#[tauri::command]
+pub fn get_dev_model(state: State<AppState>) -> Option<String> {
+    state.dev_model_override.lock().ok()?.clone()
+}
+
+/// Returns true if the prompt warrants using the heavier reasoning model.
+fn needs_reasoning(prompt: &str) -> bool {
+    // Long prompts almost always benefit from a stronger model.
+    if prompt.len() > 250 {
+        return true;
+    }
+    let lower = prompt.to_lowercase();
+    const SIGNALS: &[&str] = &[
+        "explain", "why", "how does", "how do",
+        "analyze", "analyse", "compare", "contrast",
+        "write", "create", "implement", "code", "program",
+        "design", "build", "develop",
+        "summarize", "summarise", "summary",
+        "review", "evaluate", "critique",
+        "step by step", "step-by-step",
+        "difference between", "pros and cons",
+        "debug", "fix this", "what's wrong",
+        "help me understand", "research", "essay",
+    ];
+    SIGNALS.iter().any(|kw| lower.contains(kw))
 }
 
 /// Streaming version of send_message.
@@ -128,6 +190,7 @@ pub fn get_model_info(state: State<AppState>) -> ModelInfo {
 pub fn send_message_streaming(
     prompt: String,
     conversation_id: Option<String>,
+    model_override: Option<bool>, // None=auto, Some(false)=fast, Some(true)=reasoning
     state: State<AppState>,
     app: AppHandle,
 ) -> Result<String, String> {
@@ -157,7 +220,44 @@ pub fn send_message_streaming(
         }
     };
 
-    let model_path = state.model_path.clone();
+    // Decide which model to use before spawning the thread.
+    // Priority: 1) dev pin  2) per-message override  3) auto classifier.
+    let (target_path, target_name) = {
+        let dev_id = state.dev_model_override.lock()
+            .map_err(|e| format!("Lock error: {e}"))?
+            .clone();
+
+        if let Some(id) = dev_id {
+            // Dev pin: find the model by ID and use its path directly.
+            let entry = crate::models::MODELS.iter().find(|m| m.id == id);
+            let path = entry.and_then(crate::models::installed_path);
+            match (entry, path) {
+                (Some(e), Some(p)) => (p.to_string_lossy().to_string(), e.display_name.to_string()),
+                (Some(e), None) => {
+                    // Pinned model is not downloaded — fall through to auto with a warning.
+                    log::warn!("Dev pin '{}' is set but model not found on disk; using auto", e.id);
+                    let use_reasoning = !state.reasoning_model_path.is_empty() && needs_reasoning(&prompt);
+                    if use_reasoning {
+                        (state.reasoning_model_path.clone(), state.reasoning_model_name.clone())
+                    } else {
+                        (state.model_path.clone(), state.model_name.clone())
+                    }
+                }
+                _ => (state.model_path.clone(), state.model_name.clone()),
+            }
+        } else {
+            let use_reasoning = match model_override {
+                Some(forced) => forced && !state.reasoning_model_path.is_empty(),
+                None => !state.reasoning_model_path.is_empty() && needs_reasoning(&prompt),
+            };
+            if use_reasoning {
+                (state.reasoning_model_path.clone(), state.reasoning_model_name.clone())
+            } else {
+                (state.model_path.clone(), state.model_name.clone())
+            }
+        }
+    };
+
     let loaded = state.loaded.clone();
     let db_arc = state.db.clone();
     let conv_id_thread = conv_id.clone();
@@ -187,26 +287,35 @@ pub fn send_message_streaming(
             }
         };
 
-        if guard.is_none() {
-            log::info!("Loading model: {model_path}");
-            match load_model_with_fallback(&model_path) {
-                Ok(m) => *guard = Some(m),
+        // Swap models only when the target file differs from what's loaded.
+        let needs_reload = guard.as_ref().map_or(true, |ls| ls.path != target_path);
+        if needs_reload {
+            if guard.is_some() {
+                log::info!("Swapping model -> {}", target_name);
+                *guard = None; // drop the current model before loading the next
+            }
+            log::info!("Loading model: {target_path}");
+            app.emit("chat-model", &target_name).ok();
+            match load_model_with_fallback(&target_path) {
+                Ok(m) => *guard = Some(LoadedState { path: target_path, inner: m }),
                 Err(e) => {
                     app.emit("chat-error", &e).ok();
                     return;
                 }
             }
+        } else {
+            app.emit("chat-model", &target_name).ok();
         }
 
-        let loaded_model = guard.as_ref().unwrap();
+        let ls = guard.as_ref().unwrap();
         let full_prompt = apply_chat_template(&history, &prompt, &memories);
 
         let mut full_response = String::new();
         let result = crate::inference::generate_streaming(
-            &loaded_model.backend,
-            &loaded_model.model,
+            &ls.inner.backend,
+            &ls.inner.model,
             &full_prompt,
-            1024,
+            4096,
             |token| {
                 full_response.push_str(&token);
                 app.emit("chat-token", token).ok();

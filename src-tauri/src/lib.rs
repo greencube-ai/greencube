@@ -25,19 +25,29 @@ pub fn run() {
                 .map_err(|e| format!("Failed to open database: {e}"))?;
             log::info!("Database opened at {}", db_path.display());
 
-            // Detect hardware and find whichever model file is actually on disk.
-            let (model_path, model_name) = hardware::find_available_model().unwrap_or_else(|| {
+            // Detect hardware and find the best model(s) available on disk.
+            let (fast, reasoning) = hardware::find_model_pair();
+
+            let (model_path, model_name) = fast.unwrap_or_else(|| {
                 log::warn!("No model files found in C:\\models");
                 (String::new(), String::from("No model available"))
             });
+            let (reasoning_model_path, reasoning_model_name) =
+                reasoning.unwrap_or_else(|| (String::new(), String::new()));
 
-            log::info!("Selected model: {} ({})", model_name, model_path);
+            log::info!("Fast model: {} ({})", model_name, model_path);
+            if !reasoning_model_path.is_empty() {
+                log::info!("Reasoning model: {} ({})", reasoning_model_name, reasoning_model_path);
+            }
 
             app.manage(commands::AppState {
                 model_name,
                 model_path,
+                reasoning_model_name,
+                reasoning_model_path,
                 loaded: std::sync::Arc::new(std::sync::Mutex::new(None)),
                 db: std::sync::Arc::new(std::sync::Mutex::new(db)),
+                dev_model_override: std::sync::Arc::new(std::sync::Mutex::new(None)),
             });
 
             Ok(())
@@ -56,6 +66,8 @@ pub fn run() {
             commands::delete_memory,
             commands::read_file_for_memory,
             commands::extract_pdf_bytes,
+            commands::set_dev_model,
+            commands::get_dev_model,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

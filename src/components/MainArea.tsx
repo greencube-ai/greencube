@@ -28,6 +28,11 @@ interface StoredMessage {
   content: string;
 }
 
+interface ModelInfo {
+  model_name: string;
+  reasoning_model_name: string;
+}
+
 interface Props {
   conversationId: string | null;
   onConversationCreated: (id: string) => void;
@@ -44,18 +49,45 @@ interface Parsed {
 }
 
 function parseThink(raw: string): Parsed {
-  const start = raw.indexOf("<think>");
-  if (start === -1) return { thinking: "", response: raw };
-
-  const end = raw.indexOf("</think>");
-  if (end === -1) {
-    // Still inside the think block — everything after <think> is thinking.
-    return { thinking: raw.slice(start + 7), response: "" };
+  // --- Qwen3 format: <think>...</think> ---
+  const qStart = raw.indexOf("<think>");
+  if (qStart !== -1) {
+    const qEnd = raw.indexOf("</think>", qStart);
+    if (qEnd === -1) {
+      return { thinking: raw.slice(qStart + 7), response: "" };
+    }
+    return {
+      thinking: raw.slice(qStart + 7, qEnd),
+      response: raw.slice(qEnd + 8).replace(/^\n+/, ""),
+    };
   }
 
-  const thinking = raw.slice(start + 7, end);
-  const response = raw.slice(end + 8).replace(/^\n+/, "");
-  return { thinking, response };
+  // --- Gemma 4 format: <|channel|>thought\n<channel|>...<|channel|>response\n<channel|>... ---
+  const THOUGHT = "<|channel|>thought";
+  const RESPONSE = "<|channel|>response";
+  const CONTENT = "<channel|>";
+
+  const tIdx = raw.indexOf(THOUGHT);
+  if (tIdx !== -1) {
+    const rIdx = raw.indexOf(RESPONSE, tIdx);
+
+    // Helper: strip the leading <channel|> prefix and trim surrounding newlines.
+    const strip = (s: string) => {
+      const t = s.replace(/^\n+/, "");
+      return t.startsWith(CONTENT) ? t.slice(CONTENT.length) : t;
+    };
+
+    if (rIdx === -1) {
+      // Still inside the thinking block.
+      return { thinking: strip(raw.slice(tIdx + THOUGHT.length)), response: "" };
+    }
+
+    const thinking = strip(raw.slice(tIdx + THOUGHT.length, rIdx)).trimEnd();
+    const response = strip(raw.slice(rIdx + RESPONSE.length)).trimStart();
+    return { thinking, response };
+  }
+
+  return { thinking: "", response: raw };
 }
 
 // ---------------------------------------------------------------------------
@@ -96,12 +128,13 @@ function ThinkSection({
 
 function AssistantBubble({ content }: { content: string }) {
   const { thinking, response } = parseThink(content);
-  const displayText = response || content; // fallback if no closing tag
 
   return (
     <div className="max-w-[80%] px-4 py-3 rounded-xl text-[15px] bg-white text-ink border border-[#DDD8CE]">
       {thinking && <ThinkSection thinking={thinking} defaultOpen={false} />}
-      <div className="whitespace-pre-wrap">{displayText}</div>
+      {response && <div className="whitespace-pre-wrap">{response}</div>}
+      {/* No think block at all — show raw content */}
+      {!thinking && !response && <div className="whitespace-pre-wrap">{content}</div>}
     </div>
   );
 }
@@ -142,6 +175,52 @@ function StreamingBubble({ raw }: { raw: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// ModelModeBar — Auto / Fast / Reasoning toggle
+// ---------------------------------------------------------------------------
+
+function ModelModeBar({
+  mode,
+  onChange,
+  hasReasoning,
+  activeModel,
+}: {
+  mode: "auto" | "fast" | "reasoning";
+  onChange: (m: "auto" | "fast" | "reasoning") => void;
+  hasReasoning: boolean;
+  activeModel: string;
+}) {
+  const options: { value: "auto" | "fast" | "reasoning"; label: string }[] = [
+    { value: "auto", label: "Auto" },
+    { value: "fast", label: "Fast" },
+    ...(hasReasoning ? [{ value: "reasoning" as const, label: "Reasoning" }] : []),
+  ];
+
+  return (
+    <div className="flex items-center justify-between">
+      <div className="flex gap-1">
+        {options.map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => onChange(opt.value)}
+            className={`text-[11px] px-2.5 py-0.5 rounded-full border-0 cursor-pointer transition-colors ${
+              mode === opt.value
+                ? "bg-forest text-white"
+                : "bg-transparent text-ink-soft hover:text-ink"
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+      {activeModel && (
+        <span className="text-[11px] text-ink-soft">{activeModel}</span>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // MainArea
 // ---------------------------------------------------------------------------
 
@@ -156,11 +235,27 @@ export default function MainArea({
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
+  const [activeModel, setActiveModel] = useState("");
+  const [modelMode, setModelMode] = useState<"auto" | "fast" | "reasoning">("auto");
+  const [hasReasoning, setHasReasoning] = useState(false);
 
   // Source of truth for the active conversation — may change from null to a
   // UUID mid-session without causing a remount.
   const activeConvId = useRef<string | null>(conversationId);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Fetch the initial model name and keep it updated as models swap.
+  useEffect(() => {
+    invoke<ModelInfo>("get_model_info")
+      .then((info) => {
+        setActiveModel(info.model_name);
+        setHasReasoning(!!info.reasoning_model_name);
+      })
+      .catch(() => {});
+
+    const unlisten = listen<string>("chat-model", (e) => setActiveModel(e.payload));
+    return () => { unlisten.then((fn) => fn()); };
+  }, []);
 
   // Load messages when mounted on an existing conversation.
   useEffect(() => {
@@ -241,6 +336,7 @@ export default function MainArea({
       const returnedConvId = await invoke<string>("send_message_streaming", {
         prompt,
         conversationId: activeConvId.current,
+        modelOverride: modelMode === "fast" ? false : modelMode === "reasoning" ? true : null,
       });
 
       // New conversation was just created — notify App (sidebar refresh).
@@ -301,24 +397,27 @@ export default function MainArea({
         </div>
 
         <div className="px-6 py-4 border-t border-[#DDD8CE]">
-          <div className="max-w-[700px] mx-auto flex gap-2">
-            <input
-              type="text"
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyDown={handleKeyDown}
-              disabled={streaming}
-              placeholder="Message GreenCube..."
-              className="flex-1 h-12 px-4 bg-white text-ink text-[15px] border-[1.5px] border-[#DDD8CE] rounded-lg outline-none disabled:opacity-50"
-            />
-            <button
-              type="button"
-              onClick={() => sendMessage(inputValue)}
-              disabled={streaming || !inputValue.trim()}
-              className="h-12 px-5 bg-forest text-white rounded-lg text-[14px] disabled:opacity-40 hover:opacity-90 transition-opacity cursor-pointer border-0"
-            >
-              Send
-            </button>
+          <div className="max-w-[700px] mx-auto flex flex-col gap-2">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={streaming}
+                placeholder="Message GreenCube..."
+                className="flex-1 h-12 px-4 bg-white text-ink text-[15px] border-[1.5px] border-[#DDD8CE] rounded-lg outline-none disabled:opacity-50"
+              />
+              <button
+                type="button"
+                onClick={() => sendMessage(inputValue)}
+                disabled={streaming || !inputValue.trim()}
+                className="h-12 px-5 bg-forest text-white rounded-lg text-[14px] disabled:opacity-40 hover:opacity-90 transition-opacity cursor-pointer border-0"
+              >
+                Send
+              </button>
+            </div>
+            <ModelModeBar mode={modelMode} onChange={setModelMode} hasReasoning={hasReasoning} activeModel={activeModel} />
           </div>
         </div>
       </main>
@@ -371,9 +470,7 @@ export default function MainArea({
           ))}
         </div>
 
-        <div className="text-ink-soft text-[12px]">
-          Running locally · Private · No limits
-        </div>
+        <ModelModeBar mode={modelMode} onChange={setModelMode} hasReasoning={hasReasoning} activeModel={activeModel} />
       </div>
     </main>
   );

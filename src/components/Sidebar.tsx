@@ -24,6 +24,7 @@ interface Props {
   activeConversationId: string | null;
   onSelectConversation: (id: string) => void;
   refreshKey: number;
+  onOpenSetup?: () => void;
 }
 
 export default function Sidebar({
@@ -31,6 +32,7 @@ export default function Sidebar({
   activeConversationId,
   onSelectConversation,
   refreshKey,
+  onOpenSetup,
 }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState<"chats" | "memory">("chats");
@@ -323,10 +325,14 @@ export default function Sidebar({
                 )}
               </nav>
 
-              <div className="text-ink hover:text-forest cursor-pointer text-[14px] px-4 pt-4 pb-[20px] transition-colors duration-150 ease-out">
+              <button
+                type="button"
+                onClick={onOpenSetup}
+                className="w-full text-left text-ink hover:text-forest cursor-pointer text-[14px] px-4 pt-4 pb-[20px] transition-colors duration-150 ease-out bg-transparent border-0"
+              >
                 <span className="mr-2">⚙️</span>
-                Settings
-              </div>
+                Models
+              </button>
             </>
           )}
 
