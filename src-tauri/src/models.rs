@@ -90,6 +90,10 @@ pub fn recommended_model(total_ram_gb: u64) -> &'static ModelEntry {
 
 pub fn fallback_models(total_ram_gb: u64) -> Vec<&'static ModelEntry> {
     let selected = recommended_model(total_ram_gb);
+    fallback_models_from(selected)
+}
+
+pub fn fallback_models_from(selected: &'static ModelEntry) -> Vec<&'static ModelEntry> {
     let selected_index = MODELS
         .iter()
         .position(|model| model.id == selected.id)
@@ -134,6 +138,10 @@ pub fn list_model_statuses() -> Vec<ModelStatus> {
 
 pub fn list_model_statuses_for_ram(total_ram_gb: u64) -> Vec<ModelStatus> {
     build_model_statuses(Some(recommended_model(total_ram_gb).id))
+}
+
+pub fn list_model_statuses_for_recommended(recommended_id: &str) -> Vec<ModelStatus> {
+    build_model_statuses(Some(recommended_id))
 }
 
 fn build_model_statuses(recommended_id: Option<&str>) -> Vec<ModelStatus> {

@@ -24,6 +24,16 @@ pub fn run() {
             let db = db::Db::open(&db_path).map_err(|e| format!("Failed to open database: {e}"))?;
             log::info!("Database opened at {}", db_path.display());
 
+            let hw = hardware::detect();
+            log::info!(
+                "Hardware profile: {} GB RAM, {} CPU threads, has_battery={}, on_battery={}, recommended={}",
+                hw.total_ram_gb,
+                hw.cpu_threads,
+                hw.has_battery,
+                hw.on_battery_power,
+                hw.selected_model.display_name
+            );
+
             // Detect hardware and find the best model(s) available on disk.
             let (fast, reasoning) = hardware::find_model_pair();
 
@@ -43,21 +53,32 @@ pub fn run() {
                 );
             }
 
+            let loaded = std::sync::Arc::new(std::sync::Mutex::new(None));
+            commands::preload_model_on_startup(
+                loaded.clone(),
+                model_path.clone(),
+                model_name.clone(),
+            );
+            let db = std::sync::Arc::new(std::sync::Mutex::new(db));
+            let dev_model_override = std::sync::Arc::new(std::sync::Mutex::new(None));
+            let stop_requested = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
             app.manage(commands::AppState {
                 model_name,
                 model_path,
                 reasoning_model_name,
                 reasoning_model_path,
-                loaded: std::sync::Arc::new(std::sync::Mutex::new(None)),
-                db: std::sync::Arc::new(std::sync::Mutex::new(db)),
-                dev_model_override: std::sync::Arc::new(std::sync::Mutex::new(None)),
-                stop_requested: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                loaded,
+                db,
+                dev_model_override,
+                stop_requested,
             });
 
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_model_info,
+            commands::get_hardware_profile,
             commands::is_first_run,
             commands::send_message_streaming,
             commands::list_conversations,

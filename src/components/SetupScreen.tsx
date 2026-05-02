@@ -13,6 +13,17 @@ interface ModelStatus {
   path: string;
 }
 
+interface HardwareProfile {
+  total_ram_gb: number;
+  cpu_threads: number;
+  has_battery: boolean;
+  is_laptop_likely: boolean;
+  on_battery_power: boolean;
+  recommended_model_id: string;
+  recommended_model_name: string;
+  recommendation_reason: string;
+}
+
 interface DownloadProgress {
   model_id: string;
   downloaded_bytes: number;
@@ -36,6 +47,7 @@ interface Props {
 
 export default function SetupScreen({ onClose }: Props) {
   const [models, setModels] = useState<ModelStatus[]>([]);
+  const [hardware, setHardware] = useState<HardwareProfile | null>(null);
   const [progress, setProgress] = useState<Record<string, number>>({}); // model_id → 0-100
   const [downloading, setDownloading] = useState<Set<string>>(new Set());
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -47,6 +59,10 @@ export default function SetupScreen({ onClose }: Props) {
     invoke<ModelStatus[]>("list_models")
       .then(setModels)
       .catch((e) => console.error("list_models failed:", e));
+
+    invoke<HardwareProfile>("get_hardware_profile")
+      .then(setHardware)
+      .catch((e) => console.error("get_hardware_profile failed:", e));
 
     invoke<string | null>("get_dev_model")
       .then(setDevPin)
@@ -158,8 +174,24 @@ export default function SetupScreen({ onClose }: Props) {
           <>
             <p className="text-ink-soft text-[13px] mb-4 max-w-[600px]">
               GreenCube runs AI entirely on your device. Download a model to get started.
-              The recommended model is picked based on your available RAM.
+              The recommended model is picked from your RAM, CPU profile, and portable power state.
             </p>
+
+            {hardware && (
+              <div className="mb-5 max-w-[640px] rounded-xl border border-[#DDD8CE] bg-white px-4 py-3">
+                <div className="text-[13px] text-ink">
+                  Detected {hardware.total_ram_gb} GB RAM · {hardware.cpu_threads} CPU threads ·{" "}
+                  {hardware.is_laptop_likely
+                    ? hardware.on_battery_power
+                      ? "portable device on battery"
+                      : "portable device on AC power"
+                    : "desktop-style power profile"}
+                </div>
+                <div className="text-[12px] text-ink-soft mt-1 leading-snug">
+                  Recommended: {hardware.recommended_model_name}. {hardware.recommendation_reason}
+                </div>
+              </div>
+            )}
 
             <div className="mb-6 max-w-[640px]">
               <label className="block text-[12px] text-ink-soft mb-1">

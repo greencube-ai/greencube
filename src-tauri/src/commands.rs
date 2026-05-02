@@ -379,20 +379,32 @@ fn spawn_summary_refresh(
             &messages_to_summarize,
             &loaded_state.path,
         );
-        let generated = match crate::inference::generate_with(
-            &loaded_state.inner.backend,
-            &loaded_state.inner.model,
-            &prompt,
-            SUMMARY_MAX_TOKENS,
-        ) {
-            Ok(summary) => summary,
-            Err(e) => {
+
+        // catch_unwind prevents a llama.cpp panic from poisoning the mutex.
+        // The MutexGuard is dropped at the end of the enclosing scope (not inside
+        // the closure), so if catch_unwind catches a panic the guard unwinds cleanly.
+        let inference_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            crate::inference::generate_with(
+                &loaded_state.inner.backend,
+                &loaded_state.inner.model,
+                &prompt,
+                SUMMARY_MAX_TOKENS,
+            )
+        }));
+
+        drop(guard);
+
+        let generated = match inference_result {
+            Ok(Ok(text)) => text,
+            Ok(Err(e)) => {
                 log::warn!("Failed to refresh conversation summary: {e}");
                 return;
             }
+            Err(payload) => {
+                log::warn!("Summary inference panicked: {}", panic_message(payload));
+                return;
+            }
         };
-
-        drop(guard);
 
         let summary = sanitize_summary_output(&generated);
         if summary.is_empty() {
@@ -499,6 +511,69 @@ pub struct AppState {
     pub stop_requested: Arc<AtomicBool>,
 }
 
+fn current_auto_model_info(state: &AppState) -> (String, String, String, String) {
+    let (fast, reasoning) = hardware::find_model_pair();
+
+    let (model_path, model_name) =
+        fast.unwrap_or_else(|| (state.model_path.clone(), state.model_name.clone()));
+    let (reasoning_model_path, reasoning_model_name) = reasoning.unwrap_or_else(|| {
+        (
+            state.reasoning_model_path.clone(),
+            state.reasoning_model_name.clone(),
+        )
+    });
+
+    (
+        model_path,
+        model_name,
+        reasoning_model_path,
+        reasoning_model_name,
+    )
+}
+
+pub(crate) fn preload_model_on_startup(
+    loaded: Arc<Mutex<Option<LoadedState>>>,
+    model_path: String,
+    model_name: String,
+) {
+    if model_path.is_empty() {
+        return;
+    }
+
+    std::thread::spawn(move || {
+        let mut guard = match loaded.lock() {
+            Ok(guard) => guard,
+            Err(e) => {
+                log::warn!("Startup preload lock was poisoned - resetting model state");
+                let mut guard = e.into_inner();
+                *guard = None;
+                guard
+            }
+        };
+
+        if guard
+            .as_ref()
+            .is_some_and(|loaded_state| loaded_state.path == model_path)
+        {
+            return;
+        }
+
+        log::info!("Preloading startup model: {} ({})", model_name, model_path);
+        match load_model_with_fallback(&model_path) {
+            Ok(model) => {
+                *guard = Some(LoadedState {
+                    path: model_path,
+                    inner: model,
+                });
+                log::info!("Startup model preloaded successfully");
+            }
+            Err(e) => {
+                log::warn!("Startup model preload failed: {e}");
+            }
+        }
+    });
+}
+
 // --- Commands ---
 
 /// What the frontend receives when it asks about the current model.
@@ -510,14 +585,44 @@ pub struct ModelInfo {
     pub reasoning_model_path: String,
 }
 
+#[derive(Serialize)]
+pub struct HardwareProfile {
+    pub total_ram_gb: u64,
+    pub cpu_threads: u64,
+    pub has_battery: bool,
+    pub is_laptop_likely: bool,
+    pub on_battery_power: bool,
+    pub recommended_model_id: String,
+    pub recommended_model_name: String,
+    pub recommendation_reason: String,
+}
+
 /// Returns which models are available and where they live on disk.
 #[tauri::command]
 pub fn get_model_info(state: State<AppState>) -> ModelInfo {
+    let (model_path, model_name, reasoning_model_path, reasoning_model_name) =
+        current_auto_model_info(&state);
+
     ModelInfo {
-        model_name: state.model_name.clone(),
-        model_path: state.model_path.clone(),
-        reasoning_model_name: state.reasoning_model_name.clone(),
-        reasoning_model_path: state.reasoning_model_path.clone(),
+        model_name,
+        model_path,
+        reasoning_model_name,
+        reasoning_model_path,
+    }
+}
+
+#[tauri::command]
+pub fn get_hardware_profile() -> HardwareProfile {
+    let hw = hardware::detect();
+    HardwareProfile {
+        total_ram_gb: hw.total_ram_gb,
+        cpu_threads: hw.cpu_threads,
+        has_battery: hw.has_battery,
+        is_laptop_likely: hw.is_laptop_likely,
+        on_battery_power: hw.on_battery_power,
+        recommended_model_id: hw.selected_model.id.to_string(),
+        recommended_model_name: hw.selected_model.display_name.to_string(),
+        recommendation_reason: hardware::recommendation_reason(&hw).to_string(),
     }
 }
 
@@ -608,7 +713,10 @@ pub fn send_message_streaming(
     state: State<AppState>,
     app: AppHandle,
 ) -> Result<String, String> {
-    if state.model_path.is_empty() {
+    let (auto_model_path, auto_model_name, auto_reasoning_model_path, auto_reasoning_model_name) =
+        current_auto_model_info(&state);
+
+    if auto_model_path.is_empty() {
         app.emit("chat-error", "No model file found in C:\\models")
             .ok();
         return Err("No model available".to_string());
@@ -654,30 +762,30 @@ pub fn send_message_streaming(
                         e.id
                     );
                     let use_reasoning =
-                        !state.reasoning_model_path.is_empty() && needs_reasoning(&prompt);
+                        !auto_reasoning_model_path.is_empty() && needs_reasoning(&prompt);
                     if use_reasoning {
                         (
-                            state.reasoning_model_path.clone(),
-                            state.reasoning_model_name.clone(),
+                            auto_reasoning_model_path.clone(),
+                            auto_reasoning_model_name.clone(),
                         )
                     } else {
-                        (state.model_path.clone(), state.model_name.clone())
+                        (auto_model_path.clone(), auto_model_name.clone())
                     }
                 }
-                _ => (state.model_path.clone(), state.model_name.clone()),
+                _ => (auto_model_path.clone(), auto_model_name.clone()),
             }
         } else {
             let use_reasoning = match model_override {
-                Some(forced) => forced && !state.reasoning_model_path.is_empty(),
-                None => !state.reasoning_model_path.is_empty() && needs_reasoning(&prompt),
+                Some(forced) => forced && !auto_reasoning_model_path.is_empty(),
+                None => !auto_reasoning_model_path.is_empty() && needs_reasoning(&prompt),
             };
             if use_reasoning {
                 (
-                    state.reasoning_model_path.clone(),
-                    state.reasoning_model_name.clone(),
+                    auto_reasoning_model_path.clone(),
+                    auto_reasoning_model_name.clone(),
                 )
             } else {
-                (state.model_path.clone(), state.model_name.clone())
+                (auto_model_path.clone(), auto_model_name.clone())
             }
         }
     };
@@ -1032,7 +1140,8 @@ struct DownloadError {
 /// Returns every known model and whether it is already downloaded.
 #[tauri::command]
 pub fn list_models() -> Vec<models::ModelStatus> {
-    models::list_model_statuses_for_ram(hardware::detect().total_ram_gb)
+    let hw = hardware::detect();
+    models::list_model_statuses_for_recommended(hw.selected_model.id)
 }
 
 /// Download a model from HuggingFace in the background.
