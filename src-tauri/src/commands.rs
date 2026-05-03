@@ -4,10 +4,20 @@ use llama_cpp_2::{
     llama_backend::LlamaBackend,
     model::{params::LlamaModelParams, LlamaModel},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::{hardware, models};
+
+const SYSTEM_PROMPT: &str =
+    "You are GreenCube, a helpful coding assistant. You write clean, working code. \
+     When asked to build something, you provide complete implementations.";
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ChatMessage {
+    pub role: String,
+    pub content: String,
+}
 
 // --- App state (lives for the entire duration the app is running) ---
 
@@ -23,19 +33,52 @@ pub(crate) struct LoadedModel {
 unsafe impl Send for LoadedModel {}
 unsafe impl Sync for LoadedModel {}
 
-/// Wrap a user message in the chat template the loaded model expects.
-/// Without this the model doesn't know where its turn ends, so it keeps
-/// generating — inventing more "user" messages and answering them itself.
-fn apply_chat_template(model_name: &str, user_message: &str) -> String {
+/// Format a full conversation history into the prompt string the model expects.
+/// The system prompt is prepended server-side; the frontend only sends
+/// user/assistant turns. The trailing assistant header is left open so the
+/// model continues from there.
+fn apply_chat_template(model_name: &str, messages: &[ChatMessage]) -> String {
     if model_name.contains("Llama") {
-        format!(
-            "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\nYou are a helpful assistant.<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n{user_message}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
-        )
+        apply_llama3_template(messages)
     } else {
-        format!(
-            "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\n{user_message}<|im_end|>\n<|im_start|>assistant\n"
-        )
+        apply_chatml_template(messages)
     }
+}
+
+fn apply_llama3_template(messages: &[ChatMessage]) -> String {
+    let mut out = String::from("<|begin_of_text|>");
+    out.push_str(&format!(
+        "<|start_header_id|>system<|end_header_id|>\n\n{SYSTEM_PROMPT}<|eot_id|>"
+    ));
+    for msg in messages {
+        let role = match msg.role.as_str() {
+            "assistant" => "assistant",
+            _ => "user",
+        };
+        out.push_str(&format!(
+            "<|start_header_id|>{role}<|end_header_id|>\n\n{}<|eot_id|>",
+            msg.content
+        ));
+    }
+    out.push_str("<|start_header_id|>assistant<|end_header_id|>\n\n");
+    out
+}
+
+/// ChatML format used by Qwen3 and Qwen3.5.
+fn apply_chatml_template(messages: &[ChatMessage]) -> String {
+    let mut out = format!("<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n");
+    for msg in messages {
+        let role = match msg.role.as_str() {
+            "assistant" => "assistant",
+            _ => "user",
+        };
+        out.push_str(&format!(
+            "<|im_start|>{role}\n{}<|im_end|>\n",
+            msg.content
+        ));
+    }
+    out.push_str("<|im_start|>assistant\n");
+    out
 }
 
 /// Load a model from disk, trying GPU acceleration first and falling back to
@@ -44,11 +87,14 @@ fn load_model_with_fallback(path: &str) -> Result<LoadedModel, String> {
     let backend =
         LlamaBackend::init().map_err(|e| format!("Failed to initialize llama.cpp: {e}"))?;
 
-    // Try GPU: offload all layers to Vulkan (999 is "as many as possible").
-    let gpu_params = LlamaModelParams::default().with_n_gpu_layers(999);
+    const GPU_LAYERS_REQUESTED: u32 = 999;
+    let gpu_params = LlamaModelParams::default().with_n_gpu_layers(GPU_LAYERS_REQUESTED);
     match LlamaModel::load_from_file(&backend, path, &gpu_params) {
         Ok(model) => {
-            log::info!("Model loaded with GPU acceleration (Vulkan)");
+            log::info!(
+                "Backend: Vulkan GPU. Requested up to {} offload layers (llama.cpp will print actual layer count above).",
+                GPU_LAYERS_REQUESTED
+            );
             return Ok(LoadedModel { backend, model });
         }
         Err(e) => {
@@ -56,11 +102,10 @@ fn load_model_with_fallback(path: &str) -> Result<LoadedModel, String> {
         }
     }
 
-    // CPU fallback — works on any hardware.
     let cpu_params = LlamaModelParams::default();
     let model = LlamaModel::load_from_file(&backend, path, &cpu_params)
         .map_err(|e| format!("Failed to load model: {e}"))?;
-    log::info!("Model loaded on CPU (no GPU acceleration)");
+    log::info!("Backend: CPU only (Vulkan unavailable). Generation will be much slower.");
     Ok(LoadedModel { backend, model })
 }
 
@@ -93,15 +138,19 @@ pub fn get_model_info(state: State<AppState>) -> ModelInfo {
     }
 }
 
-/// Send a message to the AI and get a response.
+/// Send a full conversation to the AI and get a response.
 ///
 /// The model is loaded from disk on the first call, then kept in memory
 /// for all subsequent calls. This makes the first message slow (~10-30s)
 /// but every message after that fast (~1-5s).
 ///
-/// Streaming (word-by-word output) comes in Phase 4.
+/// `messages` is the entire chat history in order; the last entry should be
+/// the new user message. The system prompt is added server-side.
 #[tauri::command]
-pub fn send_message(prompt: String, state: State<AppState>) -> Result<String, String> {
+pub fn send_message(
+    messages: Vec<ChatMessage>,
+    state: State<AppState>,
+) -> Result<String, String> {
     if state.model_path.is_empty() {
         return Err("No model file found in C:\\models. Download a model first.".to_string());
     }
@@ -117,9 +166,29 @@ pub fn send_message(prompt: String, state: State<AppState>) -> Result<String, St
     }
 
     let loaded = guard.as_ref().unwrap();
+    let n_ctx = ctx_size_for(&state.model_path);
 
-    crate::inference::generate_with(&loaded.backend, &loaded.model, &apply_chat_template(&state.model_name, &prompt), 1024)
-        .map_err(|e| format!("Inference failed: {e}"))
+    crate::inference::generate_with(
+        &loaded.backend,
+        &loaded.model,
+        &apply_chat_template(&state.model_name, &messages),
+        1024,
+        n_ctx,
+    )
+    .map_err(|e| format!("Inference failed: {e}"))
+}
+
+/// Decide n_ctx based on the loaded model file and current RAM.
+/// Falls back to 4096 if we can't identify the model.
+fn ctx_size_for(model_path: &str) -> u32 {
+    let filename = std::path::Path::new(model_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+    let total_ram_gb = hardware::detect().total_ram_gb;
+    models::lookup_by_filename(filename)
+        .map(|m| models::recommended_ctx(m, total_ram_gb))
+        .unwrap_or(4096)
 }
 
 /// Streaming version of send_message.
@@ -134,7 +203,7 @@ pub fn send_message(prompt: String, state: State<AppState>) -> Result<String, St
 /// The frontend should listen for these events before calling this command.
 #[tauri::command]
 pub fn send_message_streaming(
-    prompt: String,
+    messages: Vec<ChatMessage>,
     state: State<AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
@@ -146,6 +215,8 @@ pub fn send_message_streaming(
     let model_path = state.model_path.clone();
     let model_name = state.model_name.clone();
     let loaded = state.loaded.clone();
+    let n_ctx = ctx_size_for(&model_path);
+    let prompt = apply_chat_template(&model_name, &messages);
 
     // Spawn on a background thread so the UI stays responsive while the
     // model loads and generates. The command returns immediately.
@@ -173,8 +244,9 @@ pub fn send_message_streaming(
         let result = crate::inference::generate_streaming(
             &loaded.backend,
             &loaded.model,
-            &apply_chat_template(&model_name, &prompt),
+            &prompt,
             1024,
+            n_ctx,
             |token| { app.emit("chat-token", token).ok(); },
         );
 

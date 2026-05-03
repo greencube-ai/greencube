@@ -26,6 +26,16 @@ pub static MODELS: &[ModelEntry] = &[
         min_ram_gb: 0,
     },
     ModelEntry {
+        id: "qwen3.5-9b",
+        name: "Qwen3.5 9B Instruct (5.7 GB)",
+        display_name: "Qwen3.5 9B",
+        filename: "Qwen3.5-9B-Q4_K_M.gguf",
+        legacy_filenames: &["Qwen_Qwen3.5-9B-Q4_K_M.gguf"],
+        repo: "unsloth/Qwen3.5-9B-GGUF",
+        size_bytes: 5_680_522_464,
+        min_ram_gb: 0,
+    },
+    ModelEntry {
         id: "qwen3-14b",
         name: "Qwen3 14B Instruct (9.0 GB)",
         display_name: "Qwen3 14B",
@@ -33,7 +43,7 @@ pub static MODELS: &[ModelEntry] = &[
         legacy_filenames: &[],
         repo: "Qwen/Qwen3-14B-GGUF",
         size_bytes: 9_000_000_000,
-        min_ram_gb: 16,
+        min_ram_gb: 20,
     },
     ModelEntry {
         id: "mistral-small-24b",
@@ -56,6 +66,22 @@ pub fn download_url(model: &ModelEntry) -> String {
         "https://huggingface.co/{}/resolve/main/{}",
         model.repo, model.filename
     )
+}
+
+/// Pick a context window size that fits in available RAM.
+/// Larger ctx = more KV-cache memory; on tight machines we shrink it for big models.
+pub fn recommended_ctx(model: &ModelEntry, total_ram_gb: u64) -> u32 {
+    if model.size_bytes > 8_000_000_000 && total_ram_gb < 20 {
+        4096
+    } else {
+        8192
+    }
+}
+
+pub fn lookup_by_filename(filename: &str) -> Option<&'static ModelEntry> {
+    MODELS.iter().find(|m| {
+        m.filename == filename || m.legacy_filenames.iter().any(|legacy| *legacy == filename)
+    })
 }
 
 pub fn recommended_model(total_ram_gb: u64) -> &'static ModelEntry {
@@ -151,11 +177,11 @@ mod tests {
 
         assert_eq!(
             statuses.first().map(|status| status.id.as_str()),
-            Some("qwen3-14b")
+            Some("qwen3.5-9b")
         );
         assert!(statuses
             .iter()
-            .any(|status| status.id == "qwen3-14b" && status.recommended));
+            .any(|status| status.id == "qwen3.5-9b" && status.recommended));
         assert_eq!(
             statuses.iter().filter(|status| status.recommended).count(),
             1

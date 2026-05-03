@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 
 const RECENTS = [
   "Organize my photos",
@@ -8,9 +9,21 @@ const RECENTS = [
   "Draft email to mom",
 ];
 
+interface ModelInfo {
+  model_name: string;
+  model_path: string;
+}
+
 export default function Sidebar({ onNewChat }: { onNewChat?: () => void }) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [collapsed, setCollapsed] = useState(false);
+  const [modelName, setModelName] = useState<string | null>(null);
+
+  useEffect(() => {
+    invoke<ModelInfo>("get_model_info")
+      .then((info) => setModelName(info.model_name))
+      .catch(() => setModelName(null));
+  }, []);
 
   return (
     <aside
@@ -72,7 +85,16 @@ export default function Sidebar({ onNewChat }: { onNewChat?: () => void }) {
             ))}
           </nav>
 
-          <div className="text-ink hover:text-forest cursor-pointer text-[14px] px-4 pt-4 pb-[20px] transition-colors duration-150 ease-out">
+          {modelName && (
+            <div
+              className="text-ink-soft text-[11px] px-4 pt-3 pb-1 truncate"
+              title={modelName}
+            >
+              Running: {modelName}
+            </div>
+          )}
+
+          <div className="text-ink hover:text-forest cursor-pointer text-[14px] px-4 pt-2 pb-[20px] transition-colors duration-150 ease-out">
             <span className="mr-2">⚙️</span>
             Settings
           </div>

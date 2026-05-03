@@ -50,7 +50,8 @@ export default function MainArea() {
 
     const prompt = text.trim();
     setInputValue("");
-    setMessages((prev) => [...prev, { role: "user", content: prompt }]);
+    const history: Message[] = [...messages, { role: "user", content: prompt }];
+    setMessages(history);
     setStreaming(true);
     setStreamingContent("");
 
@@ -79,7 +80,7 @@ export default function MainArea() {
     });
 
     try {
-      await invoke("send_message_streaming", { prompt });
+      await invoke("send_message_streaming", { messages: history });
     } catch (e) {
       setMessages((prev) => [...prev, { role: "assistant", content: `Error: ${e}` }]);
       setStreamingContent("");

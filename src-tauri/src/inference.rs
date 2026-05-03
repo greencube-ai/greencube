@@ -9,6 +9,21 @@ use llama_cpp_2::{
     sampling::LlamaSampler,
 };
 
+fn build_ctx_params(n_ctx: u32) -> LlamaContextParams {
+    let mut sys = sysinfo::System::new();
+    sys.refresh_cpu();
+    let physical = sys.physical_core_count().unwrap_or(4);
+    let threads = physical.saturating_sub(1).max(1) as i32;
+
+    // Flash attention left at the AUTO default — llama.cpp turns it on when
+    // the active backend (Vulkan in our case) supports it. Setting it
+    // explicitly would require depending on llama-cpp-sys-2 just for the enum.
+    LlamaContextParams::default()
+        .with_n_ctx(NonZeroU32::new(n_ctx))
+        .with_n_threads(threads)
+        .with_n_threads_batch(threads)
+}
+
 /// Core generation logic. Takes an already-loaded backend and model.
 /// This is the function called on every chat message — the model stays in memory.
 pub fn generate_with(
@@ -16,8 +31,9 @@ pub fn generate_with(
     model: &LlamaModel,
     prompt: &str,
     max_tokens: u32,
+    n_ctx: u32,
 ) -> Result<String> {
-    let ctx_params = LlamaContextParams::default().with_n_ctx(NonZeroU32::new(8192));
+    let ctx_params = build_ctx_params(n_ctx);
     let mut ctx = model
         .new_context(backend, ctx_params)
         .context("Failed to create inference context")?;
@@ -87,12 +103,13 @@ pub fn generate_streaming<F>(
     model: &LlamaModel,
     prompt: &str,
     max_tokens: u32,
+    n_ctx: u32,
     mut on_token: F,
 ) -> Result<()>
 where
     F: FnMut(String),
 {
-    let ctx_params = LlamaContextParams::default().with_n_ctx(NonZeroU32::new(8192));
+    let ctx_params = build_ctx_params(n_ctx);
     let mut ctx = model
         .new_context(backend, ctx_params)
         .context("Failed to create inference context")?;
@@ -162,7 +179,7 @@ pub fn generate(model_path: &str, prompt: &str, max_tokens: u32) -> Result<Strin
     let model_params = LlamaModelParams::default();
     let model = LlamaModel::load_from_file(&backend, model_path, &model_params)
         .context("Failed to load model file — check the path is correct")?;
-    generate_with(&backend, &model, prompt, max_tokens)
+    generate_with(&backend, &model, prompt, max_tokens, 4096)
 }
 
 #[cfg(test)]

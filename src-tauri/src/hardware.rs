@@ -26,8 +26,8 @@ pub fn select_model_for_ram(total_ram_gb: u64) -> &'static ModelEntry {
 /// Read system RAM and decide which model to use.
 ///
 /// Selection rules (RAM-only for now - GPU support comes later):
-///   < 16 GB  -> Llama 3.3 8B
-///   16-31 GB -> Qwen3 14B
+///   < 20 GB  -> Qwen3.5 9B
+///   20-31 GB -> Qwen3 14B
 ///   >= 32 GB -> Mistral Small 3.1 24B
 pub fn detect() -> HardwareInfo {
     let mut sys = System::new();
@@ -85,8 +85,9 @@ mod tests {
 
     #[test]
     fn test_select_model_for_ram_uses_expected_tiers() {
-        assert_eq!(select_model_for_ram(8).id, "llama3-8b");
-        assert_eq!(select_model_for_ram(16).id, "qwen3-14b");
+        assert_eq!(select_model_for_ram(8).id, "qwen3.5-9b");
+        assert_eq!(select_model_for_ram(16).id, "qwen3.5-9b");
+        assert_eq!(select_model_for_ram(24).id, "qwen3-14b");
         assert_eq!(select_model_for_ram(48).id, "mistral-small-24b");
     }
 }
