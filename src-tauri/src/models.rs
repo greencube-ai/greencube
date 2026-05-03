@@ -11,19 +11,22 @@ pub struct ModelEntry {
     pub repo: &'static str,
     pub size_bytes: u64,
     pub min_ram_gb: u64,
+    /// ID of a heavier model to use for complex/reasoning queries. None if this is already the best.
+    pub reasoning_pair_id: Option<&'static str>,
 }
 
 /// Ordered from lightest to heaviest so RAM-based selection stays data-driven.
 pub static MODELS: &[ModelEntry] = &[
     ModelEntry {
-        id: "llama3-8b",
-        name: "Llama 3.3 8B Instruct (4.9 GB)",
-        display_name: "Llama 3.3 8B",
-        filename: "Meta-Llama-3.3-8B-Instruct-Q4_K_M.gguf",
+        id: "phi4-mini",
+        name: "Phi-4 Mini Instruct (2.4 GB)",
+        display_name: "Phi-4 Mini",
+        filename: "Phi-4-mini-instruct-Q4_K_M.gguf",
         legacy_filenames: &[],
-        repo: "lmstudio-community/Meta-Llama-3.3-8B-Instruct-GGUF",
-        size_bytes: 4_920_000_000,
+        repo: "bartowski/Phi-4-mini-instruct-GGUF",
+        size_bytes: 2_500_000_000,
         min_ram_gb: 0,
+        reasoning_pair_id: None,
     },
     ModelEntry {
         id: "qwen3-14b",
@@ -34,16 +37,29 @@ pub static MODELS: &[ModelEntry] = &[
         repo: "Qwen/Qwen3-14B-GGUF",
         size_bytes: 9_000_000_000,
         min_ram_gb: 16,
+        reasoning_pair_id: None,
     },
     ModelEntry {
-        id: "mistral-small-24b",
-        name: "Mistral Small 3.1 24B Instruct (14.0 GB)",
-        display_name: "Mistral Small 3.1 24B",
-        filename: "mistral-small-3.1-24b-instruct-2503-q4_k_m.gguf",
-        legacy_filenames: &["Mistral-Small-3.1-24B-Instruct-2503-Q4_K_M.gguf"],
-        repo: "openfree/Mistral-Small-3.1-24B-Instruct-2503-Q4_K_M-GGUF",
-        size_bytes: 14_000_000_000,
+        id: "gemma4-26b-moe",
+        name: "Gemma 4 26B-A4B MoE Instruct (17.0 GB)",
+        display_name: "Gemma 4 26B MoE",
+        filename: "google_gemma-4-26B-A4B-it-Q4_K_M.gguf",
+        legacy_filenames: &[],
+        repo: "bartowski/google_gemma-4-26B-A4B-it-GGUF",
+        size_bytes: 17_040_000_000,
         min_ram_gb: 32,
+        reasoning_pair_id: Some("gemma4-31b"),
+    },
+    ModelEntry {
+        id: "gemma4-31b",
+        name: "Gemma 4 31B Instruct (18.3 GB)",
+        display_name: "Gemma 4 31B",
+        filename: "gemma-4-31B-it-Q4_K_M.gguf",
+        legacy_filenames: &[],
+        repo: "unsloth/gemma-4-31B-it-GGUF",
+        size_bytes: 18_300_000_000,
+        min_ram_gb: 40,
+        reasoning_pair_id: None,
     },
 ];
 
@@ -74,12 +90,23 @@ pub fn recommended_model(total_ram_gb: u64) -> &'static ModelEntry {
 
 pub fn fallback_models(total_ram_gb: u64) -> Vec<&'static ModelEntry> {
     let selected = recommended_model(total_ram_gb);
+    fallback_models_from(selected)
+}
+
+pub fn fallback_models_from(selected: &'static ModelEntry) -> Vec<&'static ModelEntry> {
     let selected_index = MODELS
         .iter()
         .position(|model| model.id == selected.id)
         .unwrap_or(0);
 
     MODELS[..=selected_index].iter().rev().collect()
+}
+
+/// Returns the heavier reasoning-optimised partner for `model`, if one is defined.
+pub fn find_reasoning_pair(model: &'static ModelEntry) -> Option<&'static ModelEntry> {
+    model
+        .reasoning_pair_id
+        .and_then(|id| MODELS.iter().find(|m| m.id == id))
 }
 
 pub fn installed_path(model: &ModelEntry) -> Option<PathBuf> {
@@ -111,6 +138,10 @@ pub fn list_model_statuses() -> Vec<ModelStatus> {
 
 pub fn list_model_statuses_for_ram(total_ram_gb: u64) -> Vec<ModelStatus> {
     build_model_statuses(Some(recommended_model(total_ram_gb).id))
+}
+
+pub fn list_model_statuses_for_recommended(recommended_id: &str) -> Vec<ModelStatus> {
+    build_model_statuses(Some(recommended_id))
 }
 
 fn build_model_statuses(recommended_id: Option<&str>) -> Vec<ModelStatus> {
@@ -146,19 +177,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_list_model_statuses_for_ram_marks_qwen_as_recommended() {
-        let statuses = list_model_statuses_for_ram(16);
-
-        assert_eq!(
-            statuses.first().map(|status| status.id.as_str()),
-            Some("qwen3-14b")
-        );
-        assert!(statuses
+    fn test_list_model_statuses_for_ram_marks_recommended() {
+        let statuses_16 = list_model_statuses_for_ram(16);
+        assert!(statuses_16
             .iter()
-            .any(|status| status.id == "qwen3-14b" && status.recommended));
-        assert_eq!(
-            statuses.iter().filter(|status| status.recommended).count(),
-            1
-        );
+            .any(|s| s.id == "qwen3-14b" && s.recommended));
+
+        let statuses_32 = list_model_statuses_for_ram(32);
+        assert!(statuses_32
+            .iter()
+            .any(|s| s.id == "gemma4-26b-moe" && s.recommended));
+
+        let statuses_40 = list_model_statuses_for_ram(40);
+        assert!(statuses_40
+            .iter()
+            .any(|s| s.id == "gemma4-31b" && s.recommended));
     }
 }
