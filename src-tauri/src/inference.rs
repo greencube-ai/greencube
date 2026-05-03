@@ -33,7 +33,7 @@ pub fn generate_with(
     max_tokens: u32,
     n_ctx: u32,
 ) -> Result<String> {
-    let ctx_params = build_ctx_params(n_ctx);
+    let ctx_params = build_ctx_params(n_ctx).with_n_batch(n_ctx);
     let mut ctx = model
         .new_context(backend, ctx_params)
         .context("Failed to create inference context")?;
@@ -68,7 +68,7 @@ pub fn generate_with(
         }
 
         let piece = model
-            .token_to_piece(next_token, &mut decoder, false, None)
+            .token_to_piece(next_token, &mut decoder, true, None)
             .context("Failed to decode token to string")?;
         output.push_str(&piece);
 
@@ -107,9 +107,9 @@ pub fn generate_streaming<F>(
     mut on_token: F,
 ) -> Result<()>
 where
-    F: FnMut(String),
+    F: FnMut(String) -> bool, // return false to stop early
 {
-    let ctx_params = build_ctx_params(n_ctx);
+    let ctx_params = build_ctx_params(n_ctx).with_n_batch(n_ctx);
     let mut ctx = model
         .new_context(backend, ctx_params)
         .context("Failed to create inference context")?;
@@ -145,9 +145,11 @@ where
         }
 
         let piece = model
-            .token_to_piece(next_token, &mut decoder, false, None)
+            .token_to_piece(next_token, &mut decoder, true, None)
             .context("Failed to decode token to string")?;
 
+        // Track running output and stop cleanly at chat-template stop markers
+        // (a fallback for tokenizers that don't surface them as EOG tokens).
         let prev_len = produced.len();
         produced.push_str(&piece);
         if let Some(idx) = STOP_MARKERS.iter().filter_map(|m| produced.find(m)).min() {
@@ -157,7 +159,10 @@ where
             break;
         }
 
-        on_token(piece);
+        // Forward the piece to the caller; the closure returns false to stop early.
+        if !on_token(piece) {
+            break;
+        }
 
         batch.clear();
         batch

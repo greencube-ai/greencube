@@ -28,6 +28,9 @@ llama-cpp-2 = { version = "0.1", features = ["vulkan"] }
 encoding_rs = "0.8"
 sysinfo = "0.30"
 reqwest = { version = "0.12", features = ["blocking"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+uuid = { version = "1", features = ["v4"] }
+pdf-extract = "0.7"
 
 # Dependencies must be compiled with optimizations or inference is unusably
 # slow (~1 token/sec). Our own crate stays in fast-recompile dev mode.

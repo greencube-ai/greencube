@@ -27,3 +27,8 @@ greencube@0.1.0
 npm
 tauri
 tash
+
+# Build artifact logs that keep getting committed by accident
+src-tauri/cargo-check.log
+src-tauri/msbuild-all.log
+src-tauri/*.log
